@@ -4,6 +4,18 @@ CU-Zeroconf is a very simple Java implementation of Multicast DNS Service Discov
 
 This implementation is not correct, but it tries to make up for that by being simple, documented and readable. It has been cobbled together in 8 hours from a skim read of one or two specifications and a glance at some implementations in other languages. It is certainly less fully-featured, as it currently only supports announcing new services, and it may not even do that properly. However it does successfully announce a service in a way that Zeroconf clients seem to recognise, on one _or more_ local NetworkInterfaces, without immediately hanging, which for me at least is progress. It does this using a single Thread and a selector (from the java.nio.channels) package.
 
+Here's a simple working example:
+
+```java
+Zeroconf zeroconf = new Zeroconf();
+zeroconf.addAllNetworkInterfaces();
+Service service = zeroconf.newService("MyWeb", "http", 8080).putText("path", "/path/toservice").announce();
+// time passes
+service.cancel();
+// time passes
+zeroconf.close();
+```
+
 There is considerable room for improvement:
 
 * IPV6 is largely untested, although it appears to work.
