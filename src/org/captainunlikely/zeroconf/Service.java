@@ -232,23 +232,27 @@ public class Service {
     /**
      * Announce this Service on the network. Services can be announced more than once, although I'm unsure
      * if this is valid
+     * @return this
      */
-    public void announce() {
+    public Service announce() {
         if (done) {
             throw new IllegalStateException("Already Cancelled");
         }
         zeroconf.announce(this);
+        return this;
     }
 
     /** 
      * Cancel the announcement of this Service on the Network
+     * @return this
      */
-    public void cancel() {
+    public Service cancel() {
         if (done) {
             throw new IllegalStateException("Already Cancelled");
         }
         zeroconf.unannounce(this);
         done = true;
+        return this;
     }
 
 }
