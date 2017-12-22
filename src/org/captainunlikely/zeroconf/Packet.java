@@ -94,13 +94,19 @@ public class Packet {
             questions.add(Record.readQuestion(in));
         }
         for (int i=0;i<numanswers;i++) {
-            answers.add(Record.readAnswer(in));
+            if(in.hasRemaining()){
+                answers.add(Record.readAnswer(in));
+            }
         }
         for (int i=0;i<numauthorities;i++) {
-            authorities.add(Record.readAnswer(in));
+            if(in.hasRemaining()){
+                authorities.add(Record.readAnswer(in));
+            }
         }
         for (int i=0;i<numadditionals;i++) {
-            additionals.add(Record.readAnswer(in));
+            if(in.hasRemaining()){
+                additionals.add(Record.readAnswer(in));
+            }
         }
     }
 

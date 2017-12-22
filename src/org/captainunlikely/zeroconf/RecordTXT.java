@@ -73,6 +73,7 @@ class RecordTXT extends Record {
         StringBuilder sb = new StringBuilder();
         sb.append("{type:text, name:\"");
         sb.append(getName());
+        sb.append( "\"" );
         if (values != null) {
             sb.append(", values:");
             sb.append(getValues());
