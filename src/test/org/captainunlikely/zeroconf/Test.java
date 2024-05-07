@@ -1,16 +1,17 @@
-package zerotest;
+package org.captainunlikely.zeroconf;
 
-import org.captainunlikely.zeroconf.*;
 import java.time.*;
 
 public class Test {
+
+    private final static String now() {
+        return Instant.now().toString() + ": ";
+    }
+
     public static void main(String[] args) throws Exception {
         Zeroconf zeroconf = new Zeroconf();
         zeroconf.addAllNetworkInterfaces();
         zeroconf.addListener(new ZeroconfListener() {
-            final static String now() {
-                return Instant.now().toString() + ": ";
-            }
             @Override public void packetSent(Packet packet) {
                 System.out.println(now() + "packetSend:        " + packet);
             }

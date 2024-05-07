@@ -1,114 +1,107 @@
-<project name="dnssd" default="default">
+<project name="dnssd" default="default" xmlns:if="ant:if">
   <property name="build.sysclasspath" value="ignore"/>
   <property file="build.properties"/>
 
-  <property name="dir.test" value="test"/>
-  <property name="dir.classes" value="build"/>		<!-- where to compile the classes -->
-  <property name="dir.docs" value="docs"/>		<!-- where to build the Docs -->
-  <property name="dir.src" value="src"/>
-  <property name="jar.main" value="${ant.project.name}-${version}.jar"/>
+  <property name="description" value="ZeroConf API"/>
+  <property name="dist" value="dist"/>		        <!-- where to build the Jars -->
+  <property name="classes.main" value="build/main"/>	<!-- where to compile the classes -->
+  <property name="docs" value="docs"/>
+  <property name="src.main" value="src/main"/>
+  <property name="jar.main" value="${dist}/${project}-${version}.jar"/>
+  <property name="classes.test" value="build/test"/>	<!-- where to compile the classes -->
+  <property name="src.test" value="src/test"/>
+  <property name="jar.test" value="${dist}/${project}-test-${version}.jar"/>
 
-  <patternset id="jarresources">
-    <include name="**/*"/>
-    <exclude name="**/*.java"/>
-    <exclude name="**/package.html"/>
-    <exclude name="**/README.txt"/>
-  </patternset>
-
-  <path id="path.class">
-    <pathelement location="."/>
+  <path id="path.build">
+    <fileset dir="lib" includes="*.jar"/>
   </path>
-  <path id="path.testclass">
-    <pathelement location="."/>
-  </path>
-
-  <target name="init">
-  </target>
 
   <target name="clean">
-    <delete dir="${dir.classes}" />
-    <delete dir="${dir.test}/${dir.classes}" />
-    <delete dir="${dir.docs}" />
-    <delete file="${jar.main}" />
+    <delete dir="${classes.main}" />
+    <delete dir="${classes.test}" />
+    <delete dir="${dist}" />
+    <delete dir="${docs}" />
   </target>
 
-  <target name="compile" depends="init">
-    <mkdir dir="${dir.classes}"/>
-    <javac encoding="utf-8" debug="true" destdir="${dir.classes}">
-      <src path="${dir.src}"/>
+  <target name="build">
+    <mkdir dir="${classes.main}"/>
+    <mkdir dir="${dist}"/>
+    <javac encoding="utf-8" debug="true" source="8" target="8" destdir="${classes.main}">
+      <src path="${src.main}"/>
       <compilerarg value="-Xlint:unchecked"/>
+      <compilerarg value="-Xlint:rawtypes"/>
       <compilerarg value="-Xlint:deprecation"/>
-      <include name="**/*java"/>
-      <classpath refid="path.class" />
+      <compilerarg value="-Xlint:finally"/>
+      <compilerarg value="-Xlint:overrides"/>
+      <classpath refid="path.build" />
     </javac>
-
-    <copy todir="${dir.classes}">
-      <fileset dir="${dir.src}">
-        <patternset refid="jarresources"/>
+    <copy todir="${classes.main}">
+      <fileset dir="${src.main}">
+        <exclude name="**/*.java"/>
       </fileset>
     </copy>
-
-  </target>
-
-  <target name="jar" depends="compile">
-    <jar jarfile="${jar.main}" level="9" update="false">
-      <fileset dir="${dir.classes}"/>
-      <manifest>
-        <attribute name="Build-By" value="${user.name}"/>
-        <attribute name="Build-Date" value="${now}"/>
-        <attribute name="Implementation-Title" value="${ant.project.name}"/>
-        <attribute name="Implementation-Version" value="${version}"/>
-        <attribute name="Sealed" value="true"/>
-        <attribute name="Index" value="true"/>
-      </manifest>
+    <jar jarfile="${jar.main}" update="false">
+      <fileset dir="${classes.main}" />
     </jar>
+
+    <mkdir dir="${classes.test}"/>
+    <javac encoding="utf-8" debug="true" source="8" target="8" destdir="${classes.test}">
+      <src path="${src.test}"/>
+      <compilerarg value="-Xlint:unchecked"/>
+      <compilerarg value="-Xlint:deprecation"/>
+      <classpath>
+        <pathelement location="${jar.main}"/>
+        <path refid="path.build"/>
+      </classpath>
+    </javac>
+    <copy todir="${classes.test}">
+      <fileset dir="${src.test}">
+        <exclude name="**/*.java"/>
+      </fileset>
+    </copy>
+    <jar jarfile="${jar.test}" update="false">
+      <fileset dir="${classes.test}" />
+    </jar>
+
   </target>
 
-  <target name="javadoc" depends="compile">
-    <mkdir dir="${dir.docs}"/>
-    <javadoc destdir="${dir.docs}" access="protected" author="false" version="true" windowtitle="${project} ${version}" charset="UTF-8" additionalparam="-docfilessubdirs" use="true" breakiterator="true">
-      <classpath refid="path.class" />
+  <target name="javadoc">
+    <mkdir dir="${docs}"/>
+    <condition property="javadoc.additionalparam" value="-notimestamp"><matches pattern="^1.8" string="${java.version}"/></condition>
+    <property name="javadoc.additionalparam" value="-notimestamp --ignore-source-errors"/>
+
+    <javadoc destdir="${docs}" access="public" author="false" version="false" windowtitle="${description} ${version}" charset="UTF-8" encoding="UTF-8" docencoding="UTF-8" additionalparam="${javadoc.additionalparam}" use="true" breakiterator="true">
       <sourcefiles>
-        <fileset dir="${dir.src}" defaultexcludes="yes">
-          <include name="**/*.java"/>
-        </fileset>
+        <fileset dir="${src.main}"/>
       </sourcefiles>
-      <doctitle><![CDATA[${project} ${version}]]></doctitle>
-      <link href="http://docs.oracle.com/javase/8/docs/api"/>
+      <doctitle><![CDATA[${description} ${version}]]></doctitle>
+      <header><![CDATA[${description} ${version}]]></header>
+      <link href="https://docs.oracle.com/javase/8/docs/api/"/>
     </javadoc>
   </target>
 
-  <target name="test" depends="jar">
-    <mkdir dir="${dir.test}/${dir.classes}"/>
-    <javac encoding="utf-8" debug="true" destdir="${dir.test}/${dir.classes}">
-      <src path="${dir.test}/${dir.src}"/>
-      <compilerarg value="-Xlint:unchecked"/>
-      <compilerarg value="-Xlint:deprecation"/>
-      <include name="**/*java"/>
+  <target name="test" depends="build">
+
+    <java classname="com.bfo.sax.Test" fork="true">
+      <jvmarg value="-ea"/>
       <classpath>
-        <pathelement path="${jar.main}"/>
-        <path refid="path.testclass" />
+       <pathelement location="${jar.main}"/>
+       <pathelement location="${jar.test}"/>
+       <path refid="path.build"/>
       </classpath>
-    </javac>
-    <java classname="zerotest.Test">
-      <classpath>
-        <pathelement path="${jar.main}"/>
-        <pathelement location="${dir.test}/${dir.classes}"/>
-        <path refid="path.testclass" />
-      </classpath>
+      <arg value="--both"/>
+      <arg value="--dtd" if:true="${dtd}"/>
+      <arg value="--decl" if:true="${decl}"/>
+      <arg value="--entity" if:true="${entity}"/>
+      <arg value="--quiet" if:true="${quiet}"/>
+      <arg value="--threads" if:true="${threads}"/>
+      <arg value="--cache" if:true="${cache}"/>
+      <arg value="--nocache" if:true="${nocache}"/>
+      <arg value="--cache-publicid" if:true="${cache-publicid}"/>
+      <arg value="--nocache-publicid" if:true="${nocache-publicid}"/>
     </java>
   </target>
 
-  <target name="default">
-    <echo>
-Run ant with one or more of the following targets:
-
-  clean         - clean out any remnants of a previous build
-  jar           - build the "${jar.main}" file
-  javadoc       - build the javadocs in the ${dir.docs} directory
-  test          - run a simple test client
-
-</echo>
-  </target>
+  <target name="default" depends="test,javadoc"></target>
 
 </project>
