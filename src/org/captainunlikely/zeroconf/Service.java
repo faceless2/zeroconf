@@ -10,223 +10,189 @@ import java.util.*;
 public class Service {
 
     private final Zeroconf zeroconf;
-    private final String alias, service;
-    private final int port;
-    private String domain, protocol, host;
-    private Map<String,String> text;
+    private final String fqdn, name, type, domain;      // Store FQDN because it may not be escaped properly. Store it exactly as we hear it
+    private String host;
+    private int port;
     private List<InetAddress> addresses;
-    private Packet packet;
-    private boolean done;
+    private Map<String,String> text;
 
-    Service(Zeroconf zeroconf, String alias, String service, int port) {
+    Service(Zeroconf zeroconf, String fqdn, String name, String type, String domain) {
         this.zeroconf = zeroconf;
-        this.alias = alias;
-        for (int i=0;i<alias.length();i++) {
-            char c = alias.charAt(i);
-            if (c < 0x20 || c == 0x7F) {
-                throw new IllegalArgumentException(alias);
-            }
-        }
-        this.service = service;
-        this.port = port;
-        this.protocol = "tcp";
-        this.domain = zeroconf.getDomain();
-        this.host = zeroconf.getLocalHostName();
-        this.text = new LinkedHashMap<String,String>();
-    }
-
-    /**
-     * Set the protocol, which can be one of "tcp" (the default) or "udp"
-     * @param protocol the protocol
-     * @return this
-     */
-    public Service setProtocol(String protocol) {
-        if (packet != null) {
-            throw new IllegalStateException("Already announced");
-        }
-        if ("tcp".equals(protocol) || "udp".equals(protocol)) {
-            this.protocol = protocol;
-        } else {
-            throw new IllegalArgumentException(protocol);
-        }
-        return this;
-    }
-
-    /**
-     * Set the domain, which defaults to {@link Zeroconf#getDomain} and must begin with "."
-     * @param domain the domain
-     * @return this
-     */
-    public Service setDomain(String domain) {
-        if (packet != null) {
-            throw new IllegalStateException("Already announced");
-        }
-        if (domain == null || domain.length() < 2 || domain.charAt(0) != '.') {
-            throw new IllegalArgumentException(domain);
-        }
+        this.fqdn = fqdn;
+        this.name = name;
+        this.type = type;
         this.domain = domain;
-        return this;
+    }
+
+    Service(Zeroconf zeroconf, String fqdn) {
+        List<String> l = splitFQDN(fqdn);
+        if (l == null) {
+            throw new IllegalArgumentException("Can't split " + quote(fqdn));
+        }
+        this.zeroconf = zeroconf;
+        this.fqdn = fqdn;
+        this.name = l.get(0);
+        this.type = l.get(1);
+        this.domain = l.get(2);
     }
 
     /**
-     * Set the host which is hosting this Service, which defaults to {@link Zeroconf#getLocalHostName}.
-     * It is possible to announce a service on a non-local host
-     * @param host the host
-     * @return this
+     * Given an FQDN, split into three parts: the instance name, the type+protocol, and the domain, eg "Foo bar", "_http._tcp", ".local"
+     * return null if it fails
      */
-    public Service setHost(String host) {
-        if (packet != null) {
-            throw new IllegalStateException("Already announced");
-        }
-        this.host = host;
-        return this;
-    }
-
-    /**
-     * Set the Text record to go with this Service, which is of the form "key1=value1, key2=value2"
-     * Any existing Text records are replaced
-     * @param text the text
-     * @return this
-     */
-    public Service setText(String text) {
-        if (packet != null) {
-            throw new IllegalStateException("Already announced");
-        }
-        this.text.clear();
-        String[] q = text.split(", *");
-        for (int i=0;i<q.length;i++) {
-            String[] r = q[i].split("=");
-            if (r.length == 2) {
-                this.text.put(r[0], r[1]);
+    static List<String> splitFQDN(String name) {
+        List<String> l = new ArrayList<String>();
+        StringBuilder sb = new StringBuilder();
+        for (int i=0;i<name.length();i++) {
+            char c = name.charAt(i);
+            if (c == '\\' && i + 1 < name.length()) {
+                sb.append(name.charAt(++i));
+            } else if (c == '.') {
+                l.add(sb.toString());
+                sb.setLength(0);
             } else {
-                throw new IllegalArgumentException(text);
+                sb.append(c);
             }
         }
-        return this;
+        l.add(sb.toString());
+        // Part split is not always obvious, eg 99.99.0.110-FOO.123abcde-8f43-4985-8221-123456789abc._nvstream_dbd._udp.foo.com
+        // Look for "_tcp", "_udp", or two strings in row beginning with "_". Then build out from there.
+        for (int i=l.size()-2;i>1;i--) {
+            String s = l.get(i);
+            if (s.equals("_tcp") || s.equals("_udp") || (s.charAt(0) == '_' && l.get(i - 1).charAt(0) == '_')) {
+                String type = l.get(i - 1) + "." + s;
+                sb.setLength(0);
+                for (int j=i+1;j<l.size();j++) {
+                    sb.append('.');
+                    sb.append(l.get(j));
+                }
+                String domain = sb.toString();
+                sb.setLength(0);
+                for (int j=0;j<i - 1;j++) {
+                    if (j > 0) {
+                        sb.append('.');
+                    }
+                    sb.append(l.get(j));
+                }
+                String instance = sb.toString();
+                return Arrays.asList(instance, type, domain);
+            }
+        }
+        return null;
     }
 
-    /**
-     * Set the Text record to go with this Service, which is specified as a Map of keys and values
-     * Any existing Text records are replaced
-     * @param text the text
-     * @return this
-     */
-    public Service setText(Map<String,String> text) {
-        if (packet != null) {
-            throw new IllegalStateException("Already announced");
+    boolean setHost(String host, int port) {
+        boolean modified = false;
+        if (port != this.port) {
+            this.port = port;
+            modified = true;
         }
-        this.text.clear();
-        this.text.putAll(text);
-        return this;
+        if (host == null ? this.host != null : !host.equals(this.host)) {
+            this.host = host;
+            modified = true;
+        }
+        return modified;
     }
 
-    /**
-     * Add a Text record entry to go with this Service to the existing list of Text record entries.
-     * @param key the text key
-     * @param value the corresponding value.
-     * @return this
-     */
-    public Service putText(String key, String value) {
-        if (packet != null) {
-            throw new IllegalStateException();
+    boolean setText(Map<String,String> text) {
+        if (text == null ? this.text != null : !text.equals(this.text)) {
+            this.text = text;
+            return true;
         }
-        this.text.put(key, value);
-        return this;
+        return false;
     }
 
-    /**
-     * Add an InetAddress to the list of addresses for this service. By default they are taken
-     * from {@link Zeroconf#getLocalAddresses}, as the hostname is taken from {@link Zeroconf#getLocalHostName}.
-     * If advertising a Service on a non-local host, the addresses must be set manually using this
-     * method.
-     * @param address the InetAddress this Service resides on
-     * @return this
-     */
-    public Service addAddress(InetAddress address) {
-        if (packet != null) {
-            throw new IllegalStateException();
-        }
+    boolean addAddress(InetAddress address) {
         if (addresses == null) {
             addresses = new ArrayList<InetAddress>();
         }
-        addresses.add(address);
-        return this;
+        if (!addresses.contains(address)) {
+            addresses.add(address);
+            return true;
+        }
+        return false;
     }
 
-    /**
-     * Return the Alias for this service, as set in the {@link Zeroconf#newService} method
-     * @return the alias
-     */
-    public String getAlias() {
-        return alias;
+    boolean removeAddress(InetAddress address) {
+        return addresses != null && addresses.remove(address);
     }
 
-    /**
-     * Return the instance-name for this service. This is the "fully qualified domain name" of
-     * the service and looks something like "My Service._http._tcp.local"
-     * @return the instance name
-     */
-    public String getInstanceName() {
+    String getFQDN() {
+        return fqdn;
+        /*
         StringBuilder sb = new StringBuilder();
-        esc(alias, sb);
-        sb.append("._");
-        esc(service, sb);
-        sb.append("._");
-        sb.append(protocol);
-        sb.append(domain);
-        return sb.toString();
-    }
-
-    /**
-     * Return the service-name for this service. This is the "domain name" of
-     * the service and looks something like "._http._tcp.local" - i.e. the InstanceName
-     * without the alias. Note the rather ambiguous term "service name" comes from the spec.
-     * @return the service name
-     */
-    public String getServiceName() {
-        StringBuilder sb = new StringBuilder();
-        sb.append('_');
-        esc(service, sb);
-        sb.append("._");
-        sb.append(protocol);
-        sb.append(domain);
-        return sb.toString();
-    }
-
-    private static void esc(String in, StringBuilder out) {
-        for (int i=0;i<in.length();i++) {
-            char c = in.charAt(i);
+        for (int i=0;i<name.length();i++) {
+            char c = name.charAt(i);
             if (c == '.' || c == '\\') {
-                out.append('\\');
+                sb.append('\\');
             }
-            out.append(c);
+            sb.append(c);
+        }
+        sb.append('.');
+        sb.append(type);
+        sb.append(domain);
+        return sb.toString();
+        */
+    }
+
+    /**
+     * Return the instance name for this service.
+     * @return the name
+     */
+    public String getName() {
+        return name;
+    }
+
+    /**
+     * Return the type for this service, a combination of the service type and protocol, eg "_http._tcp"
+     * @return the type
+     */
+    public String getType() {
+        return type;
+    }
+
+    /**
+     * Return the domain for this service, usually ".local"
+     * @return the domain
+     */
+    public String getDomain() {
+        return domain;
+    }
+
+    /**
+     * Return the port for the service
+     */
+    public int getPort() {
+        return port;
+    }
+
+    /**
+     * Return the named host for this service
+     */
+    public String getHost() {
+        if (host == null) {
+            return zeroconf.getLocalHostName() + zeroconf.getDomain();
+        } else {
+            return host;
         }
     }
 
-    Packet getPacket() {
-        if (packet == null) {
-            packet = new Packet();
-            String fqdn = getInstanceName();
-            String ptrname = getServiceName();
-            String host = this.host;
-            packet.addAnswer(new RecordPTR(ptrname, fqdn).setTTL(28800));
-            packet.addAnswer(new RecordSRV(fqdn, host, port).setTTL(120));
-            if (!text.isEmpty()) {
-                packet.addAnswer(new RecordTXT(fqdn, text));
-            }
-            List<InetAddress> addresses = this.addresses;
-            if (addresses == null) {
-                addresses = zeroconf.getLocalAddresses();
-            }
-            for (InetAddress address : addresses) {
-                if (address instanceof Inet4Address) {
-                    packet.addAnswer(new RecordA(host, (Inet4Address)address));
-                } else if (address instanceof Inet6Address) {
-                    packet.addAnswer(new RecordAAAA(host, (Inet6Address)address));
-                }
-            }
+    /** 
+     * Return an unmodifiable map containing the text
+     */
+    public Map<String,String> getText() {
+        return text == null ? Collections.<String,String>emptyMap() : text;
+    }
+
+    /** 
+     * Return an unmodifiable list containing the addresses
+     */
+    public List<InetAddress> getAddresses() {
+        if (addresses == null) {
+            return zeroconf.getLocalAddresses();
+        } else {
+            return Collections.<InetAddress>unmodifiableList(addresses);
         }
-        return packet;
     }
 
     /**
@@ -234,25 +200,224 @@ public class Service {
      * if this is valid
      * @return this
      */
-    public Service announce() {
-        if (done) {
-            throw new IllegalStateException("Already Cancelled");
-        }
-        zeroconf.announce(this);
-        return this;
+    public boolean announce() {
+        return zeroconf.announce(this);
     }
 
     /** 
      * Cancel the announcement of this Service on the Network
      * @return this
      */
-    public Service cancel() {
-        if (done) {
-            throw new IllegalStateException("Already Cancelled");
+    public boolean cancel() {
+        return zeroconf.unannounce(this);
+    }
+
+    public int hashCode() {
+        int hc = getName().hashCode();
+        hc ^= getHost().hashCode();
+        return hc;
+    }
+
+    public boolean equals(Object o) {
+        if (o instanceof Service) {
+            Service s = (Service)o;
+            return getName().equals(s.getName()) && getHost().equals(s.getHost());
         }
-        zeroconf.unannounce(this);
-        done = true;
-        return this;
+        return false;
+    }
+
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"name\":");
+        sb.append(quote(name));
+        sb.append(",\"type\":");
+        sb.append(quote(type));
+        sb.append(",\"domain\":");
+        sb.append(quote(domain));
+        if (host != null) {
+            sb.append(",\"host\":");
+            sb.append(quote(host));
+            sb.append(",\"port\":");
+            sb.append(Integer.toString(port));
+        }
+        if (text != null) {
+            sb.append(",\"text\":{");
+            boolean first = true;
+            for (Map.Entry<String,String> e : text.entrySet()) {
+                if (first) {
+                    first = false;
+                } else {
+                    sb.append(',');
+                }
+                sb.append(quote(e.getKey()));
+                sb.append(':');
+                sb.append(quote(e.getValue()));
+            }
+            sb.append('}');
+        }
+        if (addresses != null) {
+            sb.append(",\"addresses\":[");
+            for (int i=0;i<addresses.size();i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append(quote(addresses.get(i).toString()));
+            }
+            sb.append("]");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    static String quote(String s) {
+        if (s == null) {
+            return s;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append('"');
+        for (int i=0;i<s.length();i++) {
+            char c = s.charAt(i);
+            if (c == '\n') {
+                sb.append("\\n");
+            } else if (c == '\r') {
+                sb.append("\\r");
+            } else if (c == '\t') {
+                sb.append("\\t");
+            } else if (c == '"') {
+                sb.append("\\\"");
+            } else if (Character.isISOControl(c)) {
+                String t = Integer.toHexString(c);
+                sb.append("\\u");
+                for (int j=t.length();j<4;j++) {
+                    sb.append('0');
+                }
+                sb.append(t);
+            } else {
+                sb.append(c);
+            }
+        }
+        sb.append('"');
+        return sb.toString();
+    }
+
+    public static class Builder {
+        private String name, type, domain, host;
+        private int port;
+        private Map<String,String> props = new LinkedHashMap<String,String>();
+        private List<InetAddress> addresses = new ArrayList<InetAddress>();
+
+        public Builder setName(String name) {
+            if (name == null || name.length() == 0) {
+                throw new IllegalArgumentException("Empty name");
+            }
+            for (int i=0;i<name.length();i++) {
+                char c = name.charAt(i);
+                if (c < 0x20 || c >= 0x7F) {
+                    throw new IllegalArgumentException("Invalid name character U+" + Integer.toHexString(c)+" in " + quote(name));
+                }
+            }
+            this.name = name;
+            return this;
+        }
+        public Builder setHost(String host) {
+            if (host != null && host.length() == 0) {
+                throw new IllegalArgumentException("Invalid host");
+            }
+            this.host = host;
+            return this;
+        }
+        public Builder setType(String type) {
+            int ix;
+            if (type == null || (ix=type.indexOf(".")) < 0 || type.length() < 2 || ix + 1 >= type.length() || type.charAt(0) != '_' || type.charAt(ix + 1) != '_') {
+                throw new IllegalArgumentException("Invalid type: must contain service+protocol, both starting with underscore eg \"_http._tcp\"");
+            }
+            this.type = type;
+            return this;
+        }
+        public Builder setDomain(String domain) {
+            if (domain != null && (domain.length() < 2 || domain.charAt(0) != '.')) {
+                throw new IllegalArgumentException("Invalid domain: must start with dot, eg \".local\"");
+            }
+            this.domain = domain;
+            return this;
+        }
+        public Builder setFQDN(String fqdn) {
+            List<String> l = splitFQDN(fqdn);
+            if (l != null) {
+                setName(l.get(0));
+                setType(l.get(1));
+                setDomain(l.get(2));
+            } else {
+                throw new IllegalArgumentException("Invalid FQDN: " + quote(fqdn) + " can't split");
+            }
+            return this;
+        }
+        public Builder setPort(int port) {
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("Invalid port");
+            }
+            this.port = port;
+            return this;
+        }
+        public Builder put(String key, String value) {
+            if (value == null) {
+                props.remove(key);
+            } else {
+                props.put(key, value);
+            }
+            return this;
+        }
+        public Builder putAll(Map<String,String> map) {
+            props.putAll(map);
+            return this;
+        }
+        public Builder addAddress(InetAddress address) {
+            if (address != null) {
+                addresses.add(address);
+            }
+            return this;
+        }
+        public Service build(Zeroconf zeroconf) {
+            if (name == null) {
+                throw new IllegalStateException("Name is required");
+            }
+            if (type == null) {
+                throw new IllegalStateException("Type is required");
+            }
+            if (port == 0) {
+                throw new IllegalStateException("Port is required");
+            }
+            if (domain == null) {
+                domain = zeroconf.getDomain();
+            }
+            if (host == null && zeroconf.getLocalHostName() == null) {
+                throw new IllegalStateException("Host is required (cannot be determined automatically)");
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i=0;i<name.length();i++) {
+                char c = name.charAt(i);
+                if (c == '.' || c == '\\') {
+                    sb.append('\\');
+                }
+                sb.append(c);
+            }
+            sb.append('.');
+            sb.append(type);
+            sb.append(domain);
+            Service service = new Service(zeroconf, sb.toString(), name, type, domain);
+            System.out.println("MADE " + service);
+            service.setHost(host, port);
+            if (!addresses.isEmpty()) {
+                service.addresses = new ArrayList<InetAddress>();
+                for (InetAddress address : addresses) {
+                    service.addAddress(address);
+                }
+            }
+            if (!props.isEmpty()) {
+                service.setText(props);
+            }
+            return service;
+        }
     }
 
 }

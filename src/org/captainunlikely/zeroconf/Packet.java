@@ -9,33 +9,124 @@ import java.nio.*;
  */
 public class Packet {
 
-    private int id;
-    private int flags;
-    private List<Record> questions;
-    private List<Record> answers;
-    private List<Record> authorities;
-    private List<Record> additionals;
+    private final int id;
+    private final int flags;
+    private final List<Record> questions, answers, authorities, additionals;
     private InetSocketAddress address;
 
     private static final int FLAG_RESPONSE = 15;
     private static final int FLAG_AA       = 10;
 
 
-    Packet() {
-        this(0);
+    /**
+     * Create a question packet
+     */
+    Packet(Record question) {
+        this.id = 0;
+        this.flags = 0;
+        this.questions = Collections.<Record>singletonList(question);
+        this.answers = this.additionals = this.authorities = Collections.<Record>emptyList();
+        this.address = null;
     }
 
-    Packet(int id) {
-        this.id = id;
-        questions = new ArrayList<Record>();
-        answers = new ArrayList<Record>();
-        authorities = new ArrayList<Record>();
-        additionals = new ArrayList<Record>();
-        setResponse(true);
+    /**
+     * Create a response packet
+     */
+    Packet(Packet question, List<Record> answers, List<Record> additionals) {
+        this.id = question.id;
+        if (additionals == null) {
+            additionals = Collections.<Record>emptyList();
+        }
+        this.answers = answers;
+        this.additionals = additionals;
+        this.questions = this.authorities = Collections.<Record>emptyList();
+        this.flags = (1<<FLAG_RESPONSE) | (1<<FLAG_AA);
     }
 
-    void setAddress(InetSocketAddress address) {
-        this.address = address;
+    /**
+     * Create an announcement packet
+     */
+    Packet(Service service) {
+        String fqdn = service.getFQDN();
+        String domain = service.getType() + service.getDomain();
+
+        List<Record> answers = new ArrayList<Record>();
+        List<Record> additionals = new ArrayList<Record>();
+        answers.add(Record.newPtr(domain, fqdn));
+        answers.add(Record.newSrv(fqdn, service.getHost(), service.getPort(), 0, 0));
+        if (!service.getText().isEmpty()) {
+            additionals.add(Record.newTxt(fqdn, service.getText()));
+        }
+        for (InetAddress address : service.getAddresses()) {
+            additionals.add(Record.newAddress(service.getHost(), address));
+        }
+
+        this.id = 0;
+        this.flags = (1<<FLAG_RESPONSE) | (1<<FLAG_AA); // response is required
+        this.answers = Collections.<Record>unmodifiableList(answers);
+        this.additionals = Collections.<Record>unmodifiableList(additionals);
+        this.questions = this.authorities = Collections.<Record>emptyList();
+        this.address = null;
+    }
+
+    /**
+     * Create a packet from the incoming datagram
+     */
+    Packet(ByteBuffer in, InetSocketAddress address) {
+        try {
+            this.address = address;
+            this.id = in.getShort() & 0xFFFF;
+            this.flags = in.getShort() & 0xFFFF;
+            int numQuestions = in.getShort() & 0xFFFF;
+            int numAnswers = in.getShort() & 0xFFFF;
+            int numAuthorities = in.getShort() & 0xFFFF;
+            int numAdditionals = in.getShort() & 0xFFFF;
+            if (numQuestions > 0) {
+                List<Record> questions = new ArrayList<Record>(numQuestions);
+                for (int i=0;i<numQuestions;i++) {
+                    questions.add(Record.readQuestion(in));
+                }
+                this.questions = Collections.<Record>unmodifiableList(questions);
+            } else {
+                this.questions = Collections.<Record>emptyList();
+            }
+            if (numAnswers > 0) {
+                List<Record> answers = new ArrayList<Record>(numAnswers);
+                for (int i=0;i<numAnswers;i++) {
+                    if (in.hasRemaining()) {
+                        answers.add(Record.readAnswer(in));
+                    }
+                }
+                this.answers = Collections.<Record>unmodifiableList(answers);
+            } else {
+                this.answers = Collections.<Record>emptyList();
+            }
+            if (numAuthorities > 0) {
+                List<Record> authorities = new ArrayList<Record>(numAuthorities);
+                for (int i=0;i<numAuthorities;i++) {
+                    if (in.hasRemaining()) {
+                        authorities.add(Record.readAnswer(in));
+                    }
+                }
+                this.authorities = Collections.<Record>unmodifiableList(authorities);
+            } else {
+                this.authorities = Collections.<Record>emptyList();
+            }
+            if (numAdditionals > 0) {
+                List<Record> additionals = new ArrayList<Record>(numAdditionals);
+                for (int i=0;i<numAdditionals;i++) {
+                    if (in.hasRemaining()) {
+                        additionals.add(Record.readAnswer(in));
+                    }
+                }
+                this.additionals = Collections.<Record>unmodifiableList(additionals);
+            } else {
+                this.additionals = Collections.<Record>emptyList();
+            }
+        } catch (Exception e) {
+            in.position(0);
+            throw (RuntimeException)new RuntimeException("Can't read packet from " + dump(in)).initCause(e);
+        }
     }
 
     InetSocketAddress getAddress() {
@@ -50,67 +141,14 @@ public class Packet {
      * Return true if it's a reponse, false if it's a query
      */
     boolean isResponse() {
-        return isFlag(FLAG_RESPONSE);
+        return (flags & (1<<FLAG_RESPONSE)) != 0;
     }
 
     boolean isAuthoritative() {
-        return isFlag(FLAG_AA);
+        return (flags & (1<<FLAG_AA)) != 0;
     }
 
-    void setResponse(boolean on) {
-        setFlag(FLAG_RESPONSE, on);
-    }
-
-    void setAuthoritative(boolean on) {
-        setFlag(FLAG_AA, on);
-    }
-
-    private boolean isFlag(int flag) {
-        return (flags & (1<<flag)) != 0;
-    }
-
-    private void setFlag(int flag, boolean on) {
-        if (on) {
-            flags |= (1<<flag);
-        } else {
-            flags &= ~(1<<flag);
-        }
-    }
-
-    void read(ByteBuffer in, InetSocketAddress address) {
-        byte[] q = new byte[in.remaining()];
-        in.get(q);
-//            System.out.println(javax.xml.bind.DatatypeConverter.printHexBinary(q));
-        in.position(0);
-
-        this.address = address;
-        id = in.getShort() & 0xFFFF;
-        flags = in.getShort() & 0xFFFF;
-        int numquestions = in.getShort() & 0xFFFF;
-        int numanswers = in.getShort() & 0xFFFF;
-        int numauthorities = in.getShort() & 0xFFFF;
-        int numadditionals = in.getShort() & 0xFFFF;
-        for (int i=0;i<numquestions;i++) {
-            questions.add(Record.readQuestion(in));
-        }
-        for (int i=0;i<numanswers;i++) {
-            if(in.hasRemaining()){
-                answers.add(Record.readAnswer(in));
-            }
-        }
-        for (int i=0;i<numauthorities;i++) {
-            if(in.hasRemaining()){
-                authorities.add(Record.readAnswer(in));
-            }
-        }
-        for (int i=0;i<numadditionals;i++) {
-            if(in.hasRemaining()){
-                additionals.add(Record.readAnswer(in));
-            }
-        }
-    }
-
-    void write(ByteBuffer out) {
+    public void write(ByteBuffer out) {
         out.putShort((short)id);
         out.putShort((short)flags);
         out.putShort((short)questions.size());
@@ -118,22 +156,82 @@ public class Packet {
         out.putShort((short)authorities.size());
         out.putShort((short)additionals.size());
         for (Record r : questions) {
-            r.write(out, this);
+            r.write(out);
         }
         for (Record r : answers) {
-            r.write(out, this);
+            r.write(out);
         }
         for (Record r : authorities) {
-            r.write(out, this);
+            r.write(out);
         }
         for (Record r : additionals) {
-            r.write(out, this);
+            r.write(out);
         }
+    }
+
+    static String dump(ByteBuffer b) {
+        StringBuilder sb = new StringBuilder();
+        int pos = b.position();
+        int len = b.remaining();
+        for (int i=0;i<len;i++) {
+            int v = b.get() & 0xff;
+            if (v < 0x10) {
+                sb.append('0');
+            }
+            sb.append(Integer.toHexString(v));
+        }
+        b.position(pos);
+        return sb.toString() + "@" + pos;
     }
 
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append("{id:"+id+", flags:"+flags+", questions:"+questions+", answers:"+answers+"}");
+        sb.append("{\"id\":");
+        sb.append(id);
+        sb.append(",\"flags\":");
+        sb.append(flags);
+        sb.append(",\"response\":" + isResponse());
+        if (questions.size() > 0) {
+            sb.append(",\"questions\":[");
+            for (int i=0;i<questions.size();i++) {
+                if (i > 0) {
+                    sb.append(",");
+                }
+                sb.append(questions.get(i));
+            }
+            sb.append(']');
+        }
+        if (answers.size() > 0) {
+            sb.append(",\"answers\":[");
+            for (int i=0;i<answers.size();i++) {
+                if (i > 0) {
+                    sb.append(",");
+                }
+                sb.append(answers.get(i));
+            }
+            sb.append(']');
+        }
+        if (additionals.size() > 0) {
+            sb.append(",\"additionals\":[");
+            for (int i=0;i<additionals.size();i++) {
+                if (i > 0) {
+                    sb.append(",");
+                }
+                sb.append(additionals.get(i));
+            }
+            sb.append(']');
+        }
+        if (authorities.size() > 0) {
+            sb.append(",\"authorities\":[");
+            for (int i=0;i<authorities.size();i++) {
+                if (i > 0) {
+                    sb.append(",");
+                }
+                sb.append(authorities.get(i));
+            }
+            sb.append(']');
+        }
+        sb.append("}");
         return sb.toString();
     }
 
@@ -149,20 +247,18 @@ public class Packet {
         return additionals;
     }
 
-    void addAnswer(Record record) {
-        answers.add(record);
-    }
-
-    void addQuestion(Record record) {
-        questions.add(record);
-    }
-
-    void addAdditional(Record record) {
-        additionals.add(record);
-    }
-
-    void addAuthority(Record record) {
-        authorities.add(record);
+    public static void main(String[] args) throws Exception {
+        for (String s : args) {
+            byte[] b = new byte[s.length() / 2];
+            for (int i=0;i<s.length();i+=2) {
+                b[i / 2] = (byte)Integer.parseInt(s.substring(i, i + 2), 16);
+            }
+            java.io.FileOutputStream out = new java.io.FileOutputStream("/tmp/t");
+            out.write(b);
+            out.close();
+            Packet p = new Packet(ByteBuffer.wrap(b, 0, b.length), null);
+            System.out.println(p);
+        }
     }
 
 }

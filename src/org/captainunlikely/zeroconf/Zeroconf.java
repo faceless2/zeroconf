@@ -15,7 +15,8 @@ import java.util.concurrent.atomic.*;
  * <pre>
  * Zeroconf zeroconf = new Zeroconf();
  * zeroconf.addAllNetworkInterfaces();
- * Service service = zeroconf.newService("MyWeb", "http", 8080).putText("path", "/path/toservice").announce();
+ * Service service = new Service.Builder().setAlias("MyWeb").setServiceName("http").setPort(8080).putText("path", "/path/toservice").build(zeroconf);
+ * service.announce();
  * // time passes
  * service.cancel();
  * // time passes
@@ -45,11 +46,11 @@ public class Zeroconf {
     private boolean useipv4, useipv6;
     private String hostname, domain;
     private InetAddress address;
-    private List<Record> registry;
-    private Collection<Service> serviceregistry;
-    private CopyOnWriteArrayList<PacketListener> receivelisteners;
-    private CopyOnWriteArrayList<PacketListener> sendlisteners;
-    private CopyOnWriteArrayList<InetAddress> localaddresses;
+    private final CopyOnWriteArrayList<ZeroconfListener> listeners;
+    private final Map<Service,Packet> announceServices;
+    private final Map<String,Service> heardServices;    // keyed on FQDN and also "!" + hostname
+    private final Collection<String> heardServiceTypes, heardServiceNames;
+    private final Map<Object,ExpiryTask> expiry;
 
     /**
      * Create a new Zeroconf object
@@ -63,12 +64,13 @@ public class Zeroconf {
         }
         useipv4 = true;
         useipv6 = false;
-        receivelisteners = new CopyOnWriteArrayList<PacketListener>();
-        sendlisteners = new CopyOnWriteArrayList<PacketListener>();
+        listeners = new CopyOnWriteArrayList<ZeroconfListener>();
+        announceServices = new ConcurrentHashMap<Service,Packet>();
+        heardServices = new ConcurrentHashMap<String,Service>();
+        heardServiceTypes = new CopyOnWriteArraySet<String>();
+        heardServiceNames = new CopyOnWriteArraySet<String>();
+        expiry = new HashMap<Object,ExpiryTask>();
         thread = new ListenerThread();
-        registry = new ArrayList<Record>();
-        serviceregistry = new HashSet<Service>();
-//        System.out.println("Listening on "+getLocalAddresses());
     }
 
     /** 
@@ -76,8 +78,7 @@ public class Zeroconf {
      * @throws InterruptedException if we couldn't rejoin the listener thread
      */
     public void close() throws InterruptedException {
-        List<Service> list = new ArrayList<Service>(serviceregistry);
-        for (Service service : list) {
+        for (Service service : announceServices.keySet()) {
             unannounce(service);
         }
         thread.close();
@@ -89,8 +90,8 @@ public class Zeroconf {
      * @param listener the listener
      * @return this Zeroconf
      */
-    public Zeroconf addReceiveListener(PacketListener listener) {
-        receivelisteners.addIfAbsent(listener);
+    public Zeroconf addListener(ZeroconfListener listener) {
+        listeners.addIfAbsent(listener);
         return this;
     }
 
@@ -100,30 +101,8 @@ public class Zeroconf {
      * @param listener the listener
      * @return this Zeroconf
      */
-    public Zeroconf removeReceiveListener(PacketListener listener) {
-        receivelisteners.remove(listener);
-        return this;
-    }
-
-    /**
-     * Add a {@link PacketListener} to the list of listeners notified when a Service
-     * Discovery Packet is sent
-     * @param listener the listener
-     * @return this Zeroconf
-     */
-    public Zeroconf addSendListener(PacketListener listener) {
-        sendlisteners.addIfAbsent(listener);
-        return this;
-    }
-
-    /**
-     * Remove a previously added {@link PacketListener} from the list of listeners notified
-     * when a Service Discovery Packet is sent
-     * @param listener the listener
-     * @return this Zeroconf
-     */
-    public Zeroconf removeSendListener(PacketListener listener) {
-        sendlisteners.remove(listener);
+    public Zeroconf removeListener(ZeroconfListener listener) {
+        listeners.remove(listener);
         return this;
     }
 
@@ -249,14 +228,6 @@ public class Zeroconf {
         thread.push(packet);
     }
 
-    /**
-     * Return the registry of records. This is the list of DNS records that we will
-     * automatically match any queries against. The returned list is live.
-     */
-    List<Record> getRegistry() {
-        return registry;
-    }
-
     /** 
      * Return the list of all Services that have been {@link Service#announce announced}
      * by this object. The returned Collection is read-only and live, so will be updated
@@ -264,128 +235,80 @@ public class Zeroconf {
      * @return the Collection of announced Services
      */
     public Collection<Service> getAnnouncedServices() {
-        return Collections.unmodifiableCollection(serviceregistry);
+        return Collections.unmodifiableCollection(announceServices.keySet());
+    }
+
+    /** 
+     * Return the list of all Services that have been heard by this object.
+     * The returned Collection is read-only and live, so will be updated by this object.
+     * @return the Collection of announced Services
+     */
+    public Collection<Service> getServices() {
+        return Collections.unmodifiableCollection(heardServices.values());
+    }
+
+    public Collection<String> getServiceTypes() {
+        return Collections.unmodifiableCollection(heardServiceTypes);
+    }
+
+    public Collection<String> getServiceNames() {
+        return Collections.unmodifiableCollection(heardServiceNames);
     }
      
     /**
-     * Given a query packet, trawl through our registry and try to find any records that
-     * match the queries. If there are any, send our own response packet.
-     *
-     * This is largely derived from other implementations, but broadly the logic here is
-     * that questions are matched against records based on the "name" and "type" fields,
-     * where {@link #DISCOVERY} and {@link Record#TYPE_ANY} are wildcards for those
-     * fields. Currently we match against all packet types - should these be just "PTR"
-     * records?
-     *
-     * Once we have this list of matched records, we search this list for any PTR records
-     * and add any matching SRV or TXT records (RFC 6763 12.1). After that, we scan our
-     * updated list and add any A or AAAA records that match any SRV records (12.2).
-     *
-     * At the end of all this, if we have at least one record, send it as a response
+     * Probe for the specified service. Responses will typically come in over the
+     * next second or so and can be queried by {@link #getServices}
+     * @param type the service type, eg "_http._tcp" ({@link #getDomain} will be appended if necessary), or null to discover services
+     * @param name the service instance name, or null to discover services of the specified type
      */
-    private void sendResponse(Packet packet) {
-        Packet response = null;
-        Set<String> targets = null;
-        for (Record question : packet.getQuestions()) {
-            for (Record record : getRegistry()) {
-                if ((question.getName().equals(DISCOVERY) || question.getName().equals(record.getName())) && (question.getType() == record.getType() || question.getType() == Record.TYPE_ANY && record.getType() != Record.TYPE_NSEC)) {
-                    if (response == null) {
-                        response = new Packet(packet.getID());
-                        response.setAuthoritative(true);
-                    }
-                    response.addAnswer(record);
-                    if (record instanceof RecordSRV) {
-                        if (targets == null) {
-                            targets = new HashSet<String>();
-                        }
-                        targets.add(((RecordSRV)record).getTarget());
-                    }
-                }
+    public void query(String type, String name) {
+        if (type == null) {
+            send(new Packet(Record.newQuestion(Record.TYPE_PTR, DISCOVERY)));
+        } else {
+            int ix = type.indexOf(".");
+            if (ix > 0 && type.indexOf('.', ix + 1) < 0) {
+                type += getDomain();
             }
-
-            if (response != null && question.getType() != Record.TYPE_ANY) {
-                // When including a DNS-SD Service Instance Enumeration or Selective
-                // Instance Enumeration (subtype) PTR record in a response packet, the
-                // server/responder SHOULD include the following additional records:
-                // o The SRV record(s) named in the PTR rdata.
-                // o The TXT record(s) named in the PTR rdata.
-                // o All address records (type "A" and "AAAA") named in the SRV rdata.
-                for (Record answer : response.getAnswers()) {
-                    if (answer.getType() == Record.TYPE_PTR) {
-                        for (Record record : getRegistry()) {
-                            if (record.getName().equals(answer.getName()) && (record.getType() == Record.TYPE_SRV || record.getType() == Record.TYPE_TXT)) {
-                                response.addAdditional(record);
-                                if (record instanceof RecordSRV) {
-                                    if (targets == null) {
-                                        targets = new HashSet<String>();
-                                    }
-                                    targets.add(((RecordSRV)record).getTarget());
-                                }
-                            }
-                        }
+            if (name == null) {
+                send(new Packet(Record.newQuestion(Record.TYPE_PTR, type)));
+            } else {
+                StringBuilder sb = new StringBuilder();
+                for (int i=0;i<name.length();i++) {
+                    char c = name.charAt(i);
+                    if (c == '.' || c == '\\') {
+                        sb.append('\\');
                     }
+                    sb.append(c);
                 }
-
+                sb.append('.');
+                sb.append(type);
+                send(new Packet(Record.newQuestion(Record.TYPE_SRV, sb.toString())));
             }
-        }
-        if (response != null) {
-            // When including an SRV record in a response packet, the
-            // server/responder SHOULD include the following additional records:
-            // o All address records (type "A" and "AAAA") named in the SRV rdata.
-            if (targets != null) {
-                for (String target : targets) {
-                    for (Record record : getRegistry()) {
-                        if (record.getName().equals(target) && (record.getType() == Record.TYPE_A || record.getType() == Record.TYPE_AAAA)) {
-                            response.addAdditional(record);
-                        }
-                    }
-                }
-            }
-            send(response);
         }
     }
 
     /**
-     * Create a new {@link Service} to be announced by this object.
-     * @param alias the Service alias, eg "My Web Server"
-     * @param service the Service type, eg "http"
-     * @param port the Service port.
-     * @return a {@link Service} which can be announced, after further modifications if necessary
+     * Announce the service - probe to see if it already exists and fail if it does, otherwise
+     * announce it
      */
-    public Service newService(String alias, String service, int port) {
-        return new Service(this, alias, service, port);
-    }
+    boolean announce(Service service) {
+        if (announceServices.containsKey(service)) {
+            return false;
+        }
+        final String fqdn = service.getFQDN();
+        if (heardServices.containsKey(fqdn)) {
+            return false;
+        }
 
-    /**
-     * Probe for a ZeroConf service with the specified name and return true if a matching
-     * service is found.
-     *
-     * The approach is borrowed from https://www.npmjs.com/package/bonjour - we send three
-     * broadcasts trying to match the service name, 250ms apart. If we receive no response,
-     * assume there is no service that matches
-     *
-     * Note the approach here is the only example of where we send a query packet. It could
-     * be used as the basis for us acting as a service discovery client
-     *
-     * @param the fully qualified servicename, eg "My Web Service._http._tcp.local".
-     */
-    private boolean probe(final String fqdn) {
-        final Packet probe = new Packet();
-        probe.setResponse(false);
-        probe.addQuestion(new RecordANY(fqdn));
+        // Do a probe to see if it exists
+        // Send three broadcasts trying to match the service name, 250ms apart.
+        // If we receive no response, assume there is no service that matches
+        final Packet probe = new Packet(Record.newQuestion(Record.TYPE_ANY, fqdn));
         final AtomicBoolean match = new AtomicBoolean(false);
-        PacketListener probelistener = new PacketListener() {
-            public void packetEvent(Packet packet) {
+        ZeroconfListener probelistener = new ZeroconfListener() {
+            public void packetReceived(Packet packet) {
                 if (packet.isResponse()) {
                     for (Record r : packet.getAnswers()) {
-                        if (r.getName().equalsIgnoreCase(fqdn)) {
-                            synchronized(match) {
-                                match.set(true);
-                                match.notifyAll();
-                            }
-                        }
-                    }
-                    for (Record r : packet.getAdditionals()) {
                         if (r.getName().equalsIgnoreCase(fqdn)) {
                             synchronized(match) {
                                 match.set(true);
@@ -396,7 +319,7 @@ public class Zeroconf {
                 }
             }
         };
-        addReceiveListener(probelistener);
+        addListener(probelistener);
         for (int i=0;i<3 && !match.get();i++) {
             send(probe);
             synchronized(match) {
@@ -405,55 +328,49 @@ public class Zeroconf {
                 } catch (InterruptedException e) {}
             }
         }
-        removeReceiveListener(probelistener);
-        return match.get();
-    }
+        removeListener(probelistener);
 
-    /**
-     * Announce the service - probe to see if it already exists and fail if it does, otherwise
-     * announce it
-     */
-    void announce(Service service) {
-        Packet packet = service.getPacket();
-        if (probe(service.getInstanceName())) {
-            throw new IllegalArgumentException("Service "+service.getInstanceName()+" already on network");
+        if (match.get()) {
+            return false;
         }
-        getRegistry().addAll(packet.getAnswers());
-        serviceregistry.add(service);
+        Packet packet = new Packet(service);
+        announceServices.put(service, packet);
         send(packet);
+        return true;
     }
 
     /**
      * Unannounce the service. Do this by re-announcing all our records but with a TTL of 0 to
      * ensure they expire. Then remove from the registry.
      */
-    void unannounce(Service service) {
-        Packet packet = service.getPacket();
-        getRegistry().removeAll(packet.getAnswers());
-        for (Record r : packet.getAnswers()) {
-            getRegistry().remove(r);
-            r.setTTL(0);
+    boolean unannounce(Service service) {
+        Packet packet = announceServices.remove(service);
+        if (packet != null) {
+            for (Record r : packet.getAnswers()) {
+                r.setTTL(0);
+            }
+            send(packet);
+            return true;
         }
-        send(packet);
-        serviceregistry.remove(service);
+        return false;
     }
 
     /**
      * The thread that listens to one or more Multicast DatagramChannels using a Selector,
-     * waiting for incoming packets. This wait can be also interuppted and a packet sent.
+     * waiting for incoming packets. This wait can be also interupted and a packet sent.
      */
     private class ListenerThread extends Thread {
         private volatile boolean cancelled;
         private Deque<Packet> sendq;
         private Map<NetworkInterface,SelectionKey> channels;
-        private Map<NetworkInterface,List<InetAddress>> localaddresses;
+        private Map<NetworkInterface,List<InetAddress>> localAddresses;
         private Selector selector;
 
         ListenerThread() {
             setDaemon(true);
             sendq = new ArrayDeque<Packet>();
             channels = new HashMap<NetworkInterface,SelectionKey>();
-            localaddresses = new HashMap<NetworkInterface,List<InetAddress>>();
+            localAddresses = new HashMap<NetworkInterface,List<InetAddress>>();
         }
 
         private synchronized Selector getSelector() throws IOException {
@@ -501,18 +418,18 @@ public class Zeroconf {
         public synchronized void addNetworkInterface(NetworkInterface nic) throws IOException {
             if (!channels.containsKey(nic) && nic.supportsMulticast() && nic.isUp() && !nic.isLoopback()) {
                 boolean ipv4 = false, ipv6 = false;
-//                System.out.print("Adding "+nic+": ");
+                System.out.print("Adding "+nic+": ");
                 List<InetAddress> locallist = new ArrayList<InetAddress>();
                 for (Enumeration<InetAddress> e = nic.getInetAddresses();e.hasMoreElements();) {
                     InetAddress a = e.nextElement();
                     ipv4 |= a instanceof Inet4Address;
                     ipv6 |= a instanceof Inet4Address;
-//                    System.out.print(a);
+                    System.out.print(a);
                     if (!a.isLoopbackAddress() && !a.isMulticastAddress()) {
                         locallist.add(a);
                     }
                 }
-//                System.out.println();
+                System.out.println();
 
                 DatagramChannel channel = DatagramChannel.open(StandardProtocolFamily.INET);
                 channel.configureBlocking(false);
@@ -523,12 +440,11 @@ public class Zeroconf {
                     channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                     channel.join(BROADCAST4.getAddress(), nic);
                 } else if (ipv6) {
-                    // TODO test
                     channel.bind(new InetSocketAddress(BROADCAST6.getPort()));
                     channel.join(BROADCAST6.getAddress(), nic);
                 }
                 channels.put(nic, channel.register(getSelector(), SelectionKey.OP_READ));
-                localaddresses.put(nic, locallist);
+                localAddresses.put(nic, locallist);
                 if (!isAlive()) {
                     start();
                 }
@@ -538,7 +454,7 @@ public class Zeroconf {
         synchronized void removeNetworkInterface(NetworkInterface nic) throws IOException {
             SelectionKey key = channels.remove(nic);
             if (key != null) {
-                localaddresses.remove(nic);
+                localAddresses.remove(nic);
                 key.channel().close();
                 getSelector().wakeup();
             }
@@ -546,7 +462,7 @@ public class Zeroconf {
 
         synchronized List<InetAddress> getLocalAddresses() {
             List<InetAddress> list = new ArrayList<InetAddress>();
-            for (List<InetAddress> pernic : localaddresses.values()) {
+            for (List<InetAddress> pernic : localAddresses.values()) {
                 for (InetAddress address : pernic) {
                     if (!list.contains(address)) {
                         list.add(address);
@@ -568,8 +484,8 @@ public class Zeroconf {
                         buf.clear();
                         packet.write(buf);
                         buf.flip();
-                        for (PacketListener listener : sendlisteners) {
-                            listener.packetEvent(packet);
+                        for (ZeroconfListener listener : listeners) {
+                            listener.packetSent(packet);
                         }
                         for (SelectionKey key : channels.values()) {
                             DatagramChannel channel = (DatagramChannel)key.channel();
@@ -588,8 +504,7 @@ public class Zeroconf {
                     }
 
                     // We know selector exists
-                    Selector selector = getSelector();
-                    selector.select();
+                    selector.select(5000);
                     Set<SelectionKey> selected = selector.selectedKeys();
                     for (SelectionKey key : selected) {
                         // We know selected keys are readable
@@ -597,19 +512,300 @@ public class Zeroconf {
                         InetSocketAddress address = (InetSocketAddress)channel.receive(buf);
                         if (address != null && buf.position() != 0) {
                             buf.flip();
-                            packet = new Packet();
-                            packet.read(buf, address);
-                            for (PacketListener listener : receivelisteners) {
-                                listener.packetEvent(packet);
-                            }
-                            sendResponse(packet);
+                            packet = new Packet(buf, address);
+                            processPacket(packet);
                         }
                     }
                     selected.clear();
+
+                    processExpiry();
+                    processTopologyChange();
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
+        }
+
+    }
+
+    private void processPacket(Packet packet) {
+        for (ZeroconfListener listener : listeners) {
+            listener.packetReceived(packet);
+        }
+        processQuestions(packet);
+        Collection<Service> mod = null, add = null;
+        for (int pass=0;pass<4;pass++) {
+            for (Record r : pass == 3 ? packet.getAdditionals() : packet.getAnswers()) {
+                boolean ok = false;
+                switch (pass) {
+                    case 0:  ok = r.getType() == Record.TYPE_PTR; break;
+                    case 1:  ok = r.getType() == Record.TYPE_SRV; break;
+                    default: ok = r.getType() != Record.TYPE_SRV && r.getType() != Record.TYPE_PTR;
+                }
+                if (ok) {
+                    for (Service service : processAnswer(r, packet, null)) {
+                        if (heardServices.putIfAbsent(service.getFQDN(), service) != null) {
+                            if (mod == null) {
+                                mod = new LinkedHashSet<Service>();
+                            }
+                            if (!mod.contains(service)) {
+                                mod.add(service);
+                            }
+                        } else {
+                            if (add == null) {
+                                add = new ArrayList<Service>();
+                            }
+                            if (!add.contains(service)) {
+                                add.add(service);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (mod != null) {
+            if (add != null) {
+                mod.removeAll(add);
+            }
+            for (Service service : mod) {
+                for (ZeroconfListener listener : listeners) {
+                    listener.serviceModified(service);
+                }
+            }
+        }
+        if (add != null) {
+            for (Service service : add) {
+                for (ZeroconfListener listener : listeners) {
+                    listener.serviceAnnounced(service);
+                }
+            }
+        }
+    }
+
+    private void processQuestions(Packet packet) {
+        List<Record> answers = null, additionals = null;
+        for (Record question : packet.getQuestions()) {
+            if (question.getName().equals(DISCOVERY) && (question.getType() == Record.TYPE_PTR || question.getType() == Record.TYPE_ANY)) {
+                for (Service s : announceServices.keySet()) { 
+                    if (answers == null) {
+                        answers = new ArrayList<Record>();
+                    }
+                    answers.add(Record.newPtr(DISCOVERY, s.getType()));
+                }
+            } else {
+                for (Packet p : announceServices.values()) { 
+                    for (Record answer : p.getAnswers()) {
+                        if (question.getName().equals(answer.getName()) && (question.getType() == answer.getType() || question.getType() == Record.TYPE_ANY)) {
+                            if (answers == null) {
+                                answers = new ArrayList<Record>();
+                            }
+                            if (additionals == null) {
+                                additionals = new ArrayList<Record>();
+                            }
+                            answers.add(answer);
+                            if (answer.getType() == Record.TYPE_PTR && question.getType() != Record.TYPE_ANY) {
+                                // When including a DNS-SD Service Instance Enumeration or Selective
+                                // Instance Enumeration (subtype) PTR record in a response packet, the
+                                // server/responder SHOULD include the following additional records:
+                                // * The SRV record(s) named in the PTR rdata.
+                                // * The TXT record(s) named in the PTR rdata.
+                                // * All address records (type "A" and "AAAA") named in the SRV rdata.
+                                for (Record a : p.getAnswers()) {
+                                    if (a.getType() == Record.TYPE_SRV || a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
+                                        additionals.add(a);
+                                    }
+                                }
+                            } else if (answer.getType() == Record.TYPE_SRV && question.getType() != Record.TYPE_ANY) {
+                                // When including an SRV record in a response packet, the
+                                // server/responder SHOULD include the following additional records:
+                                // * All address records (type "A" and "AAAA") named in the SRV rdata.
+                                for (Record a : p.getAnswers()) {
+                                    if (a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
+                                        additionals.add(a);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (answers != null) {
+            Packet response = new Packet(packet, answers, additionals);
+            send(response);
+        }
+    }
+
+    private List<Service> processAnswer(final Record r, final Packet packet, Service service) {
+        List<Service> out = null;
+        if (r.getType() == Record.TYPE_PTR && r.getName().equals(DISCOVERY)) {
+            String type = r.getPtrValue();
+            if (heardServiceTypes.add(type)) {
+                for (ZeroconfListener listener : listeners) {
+                    listener.typeNamed(type);
+                }
+                expire(type, r.getTTL(), new Runnable() {
+                    public void run() {
+                        heardServiceTypes.remove(type);
+                        for (ZeroconfListener listener : listeners) {
+                            listener.typeNameExpired(type);
+                        }
+                    }
+                });
+            }
+        } else if (r.getType() == Record.TYPE_PTR) {
+            final String type = r.getName();
+            final String fqdn = r.getPtrValue();        // Will be a service FQDN
+            if (heardServiceTypes.add(type)) {
+                for (ZeroconfListener listener : listeners) {
+                    listener.typeNamed(type);
+                }
+                expire(type, r.getTTL(), new Runnable() {
+                    public void run() {
+                        heardServiceTypes.remove(type);
+                        for (ZeroconfListener listener : listeners) {
+                            listener.typeNameExpired(type);
+                        }
+                    }
+                });
+            }
+            if (heardServiceNames.add(fqdn)) {
+                if (fqdn.endsWith(type)) {
+                    final String name = fqdn.substring(0, fqdn.length() - type.length() - 1);
+                    for (ZeroconfListener listener : listeners) {
+                        listener.serviceNamed(type, name);
+                    }
+                    expire(fqdn, r.getTTL(), new Runnable() {
+                        public void run() {
+                            heardServiceNames.remove(fqdn);
+                            for (ZeroconfListener listener : listeners) {
+                                listener.serviceNameExpired(type, name);
+                            }
+                        }
+                    });
+                } else {
+                    for (ZeroconfListener listener : listeners) {
+                        listener.packetError(packet, "PTR name " + Service.quote(fqdn) + " doesn't end with type " + Service.quote(type));
+                    }
+                    service = null;
+                }
+            }
+        } else if (r.getType() == Record.TYPE_SRV) {
+            final String fqdn = r.getName();
+            service = heardServices.get(fqdn);
+            boolean modified = false;
+            if (service == null) {
+                List<String> l = Service.splitFQDN(fqdn);
+                if (l != null) {
+                    service = new Service(Zeroconf.this, fqdn, l.get(0), l.get(1), l.get(2));
+                    modified = true;
+                } else {
+                    for (ZeroconfListener listener : listeners) {
+                        listener.packetError(packet, "Couldn't split SRV name " + Service.quote(fqdn));
+                    }
+                }
+            }
+            if (service != null) {
+                if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
+                    modified = true;
+                }
+                final Service fservice = service;
+                expire(service, r.getTTL(), new Runnable() {
+                    public void run() {
+                        heardServices.remove(fservice);
+                        for (ZeroconfListener listener : listeners) {
+                            listener.serviceExpired(fservice);
+                        }
+                    }
+                });
+                if (!modified) {
+                    service = null;
+                }
+            }
+        } else if (r.getType() == Record.TYPE_TXT) {
+            final String fqdn = r.getName();
+            if (service == null) {
+                service = heardServices.get(fqdn);
+                if (service != null) {
+                    if (processAnswer(r, packet, service) == null) {
+                        service = null;
+                    }
+                }
+            } else if (fqdn.equals(service.getFQDN())) {
+                final Service fservice = service;
+                if (!service.setText(r.getText())) {
+                    service = null;
+                }
+                expire("txt " + fqdn, r.getTTL(), new Runnable() {
+                    public void run() {
+                        if (fservice.setText(null)) {
+                            for (ZeroconfListener listener : listeners) {
+                                listener.serviceModified(fservice);
+                            }
+                        }
+                    }
+                });
+            }
+        } else if (r.getType() == Record.TYPE_A || r.getType() == Record.TYPE_AAAA) {
+            final String host = r.getName();
+            if (service == null) {
+                out = new ArrayList<Service>();
+                for (Service s : heardServices.values()) {
+                    if (host.equals(s.getHost())) {
+                        if (processAnswer(r, packet, s) != null)  {
+                            out.add(s);
+                        }
+                    }
+                }
+            } else if (host.equals(service.getHost())) {
+                final Service fservice = service;
+                InetAddress address = r.getAddress();
+                if (!service.addAddress(address)) {
+                    service = null;
+                }
+                expire(host + " " + address, r.getTTL(), new Runnable() {
+                    public void run() {
+                        if (fservice.removeAddress(address)) {
+                            for (ZeroconfListener listener : listeners) {
+                                listener.serviceModified(fservice);
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        if (out == null) {
+            out = service == null ? Collections.<Service>emptyList() : Collections.<Service>singletonList(service);
+        }
+        return out;
+    }
+
+    private void processExpiry() {
+        // Poor mans ScheduledExecutorQueue - we won't have many of these and we're interrupting
+        // regularly anyway, so expire then when we wake.
+        long now = System.currentTimeMillis();
+        for (Iterator<ExpiryTask> i = expiry.values().iterator();i.hasNext();) {
+            ExpiryTask e = i.next();
+            if (now > e.expiry) {
+                i.remove();
+                e.task.run();
+            }
+        }
+    }
+
+    private void processTopologyChange() {
+    }
+
+    private void expire(Object key, int ttl, Runnable task) {
+        expiry.put(key, new ExpiryTask(System.currentTimeMillis() + ttl * 1000, task));
+    }
+
+    private static class ExpiryTask {
+        final long expiry;
+        final Runnable task;
+        ExpiryTask(long expiry, Runnable task) {
+            this.expiry = expiry;
+            this.task = task;
         }
     }
 
