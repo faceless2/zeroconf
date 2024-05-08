@@ -1,4 +1,4 @@
-package org.captainunlikely.zeroconf;
+package com.bfo.zeroconf;
 
 /**
  * An interface that will be notified of a packet transmission

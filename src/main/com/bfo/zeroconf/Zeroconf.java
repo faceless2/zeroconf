@@ -1,4 +1,4 @@
-package org.captainunlikely.zeroconf;
+package com.bfo.zeroconf;
 
 import java.io.*;
 import java.nio.*;

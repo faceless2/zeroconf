@@ -76,29 +76,19 @@
       </sourcefiles>
       <doctitle><![CDATA[${description} ${version}]]></doctitle>
       <header><![CDATA[${description} ${version}]]></header>
-      <link href="https://docs.oracle.com/javase/8/docs/api/"/>
+      <link href="https://docs.oracle.com/en/java/javase/17/docs/api/"/>
     </javadoc>
   </target>
 
   <target name="test" depends="build">
 
-    <java classname="com.bfo.sax.Test" fork="true">
+    <java classname="com.bfo.zeroconf.Test" fork="true">
       <jvmarg value="-ea"/>
       <classpath>
        <pathelement location="${jar.main}"/>
        <pathelement location="${jar.test}"/>
        <path refid="path.build"/>
       </classpath>
-      <arg value="--both"/>
-      <arg value="--dtd" if:true="${dtd}"/>
-      <arg value="--decl" if:true="${decl}"/>
-      <arg value="--entity" if:true="${entity}"/>
-      <arg value="--quiet" if:true="${quiet}"/>
-      <arg value="--threads" if:true="${threads}"/>
-      <arg value="--cache" if:true="${cache}"/>
-      <arg value="--nocache" if:true="${nocache}"/>
-      <arg value="--cache-publicid" if:true="${cache-publicid}"/>
-      <arg value="--nocache-publicid" if:true="${nocache-publicid}"/>
     </java>
   </target>
 

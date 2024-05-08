@@ -1,4 +1,4 @@
-package org.captainunlikely.zeroconf;
+package com.bfo.zeroconf;
 
 import java.io.*;
 import java.nio.*;
@@ -7,7 +7,7 @@ import java.util.*;
 import java.net.*;
 
 /**
- * Base class for a DNS record. Written entirely without the benefit of specifications.
+ * Base class for a DNS record
  */
 final class Record {
 
@@ -27,6 +27,10 @@ final class Record {
     private int ttl;
 
     /**
+     * @param tyoe the type
+     * @param clazz the class - seems to have no real impact
+     * @param ttl the ttl in seconds
+     * @param name the name
      * @param data any object, or null for questions
      */
     private Record(int type, int clazz, int ttl, String name, Object data) {
@@ -94,16 +98,22 @@ final class Record {
         return data instanceof Map ? (Map<String,String>)data : null;
     }
 
-    boolean isUnicastQuery() {
-        return (clazz & 0x80) != 0;
-    }
-
     //----------------------------------------------------
 
+    /**
+     * Create a new Question
+     * @param type the type
+     * @param name the name
+     */
     static Record newQuestion(int type, String name) {
         return new Record(type, CLAZZ, 0, name, null);
     }
 
+    /**
+     * Create a new A or AAAA record
+     * @param name the name
+     * @param address the address
+     */
     static Record newAddress(String name, InetAddress address) {
         if (name == null) {
             throw new IllegalArgumentException("name is null");
@@ -116,6 +126,11 @@ final class Record {
         }
     }
 
+    /**
+     * Create a new PTR record
+     * @param name the name
+     * @param value the value
+     */
     static Record newPtr(String name, String value) {
         if (name == null || value == null) {
             throw new IllegalArgumentException("name or value is null");
@@ -424,10 +439,12 @@ final class Record {
         }
     }
 
+    /*
     public static void main(String[] args) throws Exception {
         for (String s : args) {
             System.out.println(Service.splitFQDN(s));
         }
     }
+    */
 
 }

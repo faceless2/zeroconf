@@ -1,4 +1,4 @@
-package org.captainunlikely.zeroconf;
+package com.bfo.zeroconf;
 
 import java.net.*;
 import java.util.*;
@@ -20,6 +20,7 @@ public class Packet {
 
     /**
      * Create a question packet
+     * @param question the question record
      */
     Packet(Record question) {
         this.id = 0;
@@ -31,6 +32,9 @@ public class Packet {
 
     /**
      * Create a response packet
+     * @param question the packet we're responding to
+     * @param answers the answer records
+     * @param additionals the additionals records
      */
     Packet(Packet question, List<Record> answers, List<Record> additionals) {
         this.id = question.id;
@@ -45,6 +49,7 @@ public class Packet {
 
     /**
      * Create an announcement packet
+     * @param service the service we're announcing
      */
     Packet(Service service) {
         String fqdn = service.getFQDN();
@@ -70,7 +75,9 @@ public class Packet {
     }
 
     /**
-     * Create a packet from the incoming datagram
+     * Create a packet from an incoming datagram
+     * @param in the incoming packet
+     * @param address the address we read from
      */
     Packet(ByteBuffer in, InetSocketAddress address) {
         try {
@@ -129,10 +136,16 @@ public class Packet {
         }
     }
 
+    /**
+     * The address we read from
+     */
     InetSocketAddress getAddress() {
         return address;
     }
 
+    /**
+     * The ID of the packet
+     */
     int getID() {
         return id;
     }
@@ -144,10 +157,10 @@ public class Packet {
         return (flags & (1<<FLAG_RESPONSE)) != 0;
     }
 
-    boolean isAuthoritative() {
-        return (flags & (1<<FLAG_AA)) != 0;
-    }
-
+    /**
+     * Write the packet
+     * @param out the ByteByffer to write to
+     */
     public void write(ByteBuffer out) {
         out.putShort((short)id);
         out.putShort((short)flags);
@@ -247,6 +260,7 @@ public class Packet {
         return additionals;
     }
 
+    /*
     public static void main(String[] args) throws Exception {
         for (String s : args) {
             byte[] b = new byte[s.length() / 2];
@@ -260,5 +274,6 @@ public class Packet {
             System.out.println(p);
         }
     }
+    */
 
 }
