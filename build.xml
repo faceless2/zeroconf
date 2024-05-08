@@ -13,7 +13,6 @@
   <property name="jar.test" value="${dist}/${project}-test-${version}.jar"/>
 
   <path id="path.build">
-    <fileset dir="lib" includes="*.jar"/>
   </path>
 
   <target name="clean">
