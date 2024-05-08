@@ -10,17 +10,41 @@ import java.util.concurrent.atomic.*;
 
 /**
  * <p>
- * This is the root class for the Service Discovery object. A typical use to publish a record is
+ * This is the root class for the Service Discovery object, which can be used to announce a {@link Service},
+ * listen for announcements or both. Typical use to announce a Sevice:
  * </p>
  * <pre>
- * Zeroconf zeroconf = new Zeroconf();
- * zeroconf.addAllNetworkInterfaces();
- * Service service = new Service.Builder().setAlias("MyWeb").setServiceName("http").setPort(8080).putText("path", "/path/toservice").build(zeroconf);
+ * Zeroconf zc = new Zeroconf();
+ * Service service = new Service.Builder().setName("MyWeb").setType("_http._tcp").setPort(8080).put("path", "/path/toservice").build(zc);
  * service.announce();
  * // time passes
  * service.cancel();
  * // time passes
- * zeroconf.close();
+ * zc.close();
+ * </pre>
+ * And to retrieve records, either add a {@link ZeroconfListener} by calling {@link #addListener},
+ * or simply traverse the Collection returned from {@link #getServices}. Services will be added when
+ * they are heard on the network - to ask the network to announce them, see {@link #query}.
+ * <pre>
+ * Zeroconf zc = new Zeroconf();
+ * zc.addListener(new ZeroconfListener() {
+ *   public void serviceNamed(String type, String name) {
+ *     if ("_http._tcp.local".equals(type)) {
+ *       // Ask for details on any announced HTTP services
+ *       zc.query(type, name);
+ *     }
+ *   }
+ * });
+ * // Ask for any HTTP services
+ * zc.query("_http._tcp.local", null);
+ * // time passes
+ * for (Service s : zc.getServices()) {
+ *   if (s.getType().equals("_http._tcp") {
+ *     // We've found an HTTP service
+ *   }
+ * }
+ * // time passes
+ * zc.close();
  * </pre>
  * <p>
  * This class does not have any fancy hooks to clean up. The {@link #close} method should be called when the
@@ -31,12 +55,13 @@ import java.util.concurrent.atomic.*;
  */
 public class Zeroconf {
 
+    private static final int PORT = 5353;
     private static final String DISCOVERY = "_services._dns-sd._udp.local";
     private static final InetSocketAddress BROADCAST4, BROADCAST6;
     static {
         try {
-            BROADCAST4 = new InetSocketAddress(InetAddress.getByName("224.0.0.251"), 5353);
-            BROADCAST6 = new InetSocketAddress(InetAddress.getByName("FF02::FB"), 5353);
+            BROADCAST4 = new InetSocketAddress(InetAddress.getByName("224.0.0.251"), PORT);
+            BROADCAST6 = new InetSocketAddress(InetAddress.getByName("FF02::FB"), PORT);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -51,6 +76,7 @@ public class Zeroconf {
     private final Map<String,Service> heardServices;    // keyed on FQDN and also "!" + hostname
     private final Collection<String> heardServiceTypes, heardServiceNames;
     private final Map<Object,ExpiryTask> expiry;
+    private final Collection<NetworkInterface> nics;
 
     /**
      * Create a new Zeroconf object
@@ -71,6 +97,58 @@ public class Zeroconf {
         heardServiceNames = new CopyOnWriteArraySet<String>();
         expiry = new HashMap<Object,ExpiryTask>();
         thread = new ListenerThread();
+
+        nics = new AbstractCollection<NetworkInterface>() {
+            private Set<NetworkInterface> mynics = new HashSet<NetworkInterface>();
+            @Override public int size() {
+                return mynics.size();
+            }
+            @Override public boolean add(NetworkInterface nic) {
+                if (nic == null) {
+                    throw new IllegalArgumentException("NIC is null");
+                }
+                if (mynics.add(nic)) {
+                    try {
+                        thread.addNetworkInterface(nic);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+            @Override public Iterator<NetworkInterface> iterator() {
+                return new Iterator<NetworkInterface>() {
+                    private Iterator<NetworkInterface> i = mynics.iterator();
+                    private NetworkInterface cur;
+                    @Override public boolean hasNext() {
+                        return i.hasNext();
+                    }
+                    @Override public NetworkInterface next() {
+                        return cur = i.next();
+                    }
+                    @Override public void remove() {
+                        try {
+                            thread.removeNetworkInterface(cur);
+                            i.remove();
+                            cur = null;
+                        } catch (RuntimeException e) {
+                            throw e;
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                };
+            }
+        };
+        try {
+            for (Enumeration<NetworkInterface> e = NetworkInterface.getNetworkInterfaces();e.hasMoreElements();) {
+                nics.add(e.nextElement());
+            }
+        } catch (Exception e) {
+            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.WARNING, "Can't add NetworkInterfaces", e);
+        }
     }
 
     /** 
@@ -85,10 +163,9 @@ public class Zeroconf {
     }
 
     /**
-     * Add a {@link PacketListener} to the list of listeners notified when a Service Discovery
-     * Packet is received
+     * Add a {@link ZeroconfListener} to the list of listeners notified of events
      * @param listener the listener
-     * @return this Zeroconf
+     * @return this
      */
     public Zeroconf addListener(ZeroconfListener listener) {
         listeners.addIfAbsent(listener);
@@ -96,10 +173,9 @@ public class Zeroconf {
     }
 
     /**
-     * Remove a previously added {@link PacketListener} from the list of listeners notified when
-     * a Service Discovery Packet is received
+     * Remove a previously added {@link ZeroconfListener} from the list of listeners notified of events
      * @param listener the listener
-     * @return this Zeroconf
+     * @return this
      */
     public Zeroconf removeListener(ZeroconfListener listener) {
         listeners.remove(listener);
@@ -108,60 +184,19 @@ public class Zeroconf {
 
     /**
      * <p>
-     * Add a {@link NetworkInterface} to the list of interfaces that send and received Service
-     * Discovery Packets. The interface should be up, should
-     * {@link NetworkInterface#supportsMulticast} support Multicast and not be a
-     * {@link NetworkInterface#isLoopback Loopback interface}. However, adding a
-     * NetworkInterface that does not match this requirement will not throw an Exception - it
-     * will just be ignored, as will any attempt to add a NetworkInterface that has already
-     * been added.
+     * Return a modifiable Collection containing the interfaces that send and received Service Discovery Packets.
+     * All the interface's IP addresses will be added to the {@link #getLocalAddresses} list,
+     * and if that list changes or the interface goes up or down, the list will be updated automatically.
      * </p><p>
-     * All the interface's IP addresses will be added to the list of
-     * {@link #getLocalAddresses local addresses}.
-     * If the interface's addresses change, or the interface is otherwise modified in a
-     * significant way, then it should be removed and re-added to this object. This is
-     * not done automatically.
+     * The default list is everything from {@link NetworkInterface#getNetworkInterfaces}.
+     * Interfaces that don't {@link NetworkInterface#supportsMulticast support Multicast} or that
+     * are {@link NetworkInterface#isLoopback loopbacks} are silently ignored. Interfaces that have both
+     * IPv4 and IPv6 addresses will listen on both protocols if possible.
      * </p>
-     * @param nic a NetworkInterface 
-     * @return this
-     * @throws IOException if something goes wrong in an I/O way
+     * @return a modifiable collection of {@link NetworkInterface} objects
      */
-    public Zeroconf addNetworkInterface(NetworkInterface nic) throws IOException {
-        if (nic == null) {
-            throw new NullPointerException("NIC is null");
-        }
-        thread.addNetworkInterface(nic);
-        return this;
-    }
-
-    /**
-     * Remove a {@link #addNetworkInterface previously added} NetworkInterface from this
-     * object's list. The addresses that were part of the interface at the time it was added
-     * will be removed from the list of {@link #getLocalAddresses local addresses}.
-     * @param nic a NetworkInterface 
-     * @return this
-     * @throws IOException if something goes wrong in an I/O way
-     */
-    public Zeroconf removeNetworkInterface(NetworkInterface nic) throws IOException {
-        thread.removeNetworkInterface(nic);
-        return this;
-    }
-
-    /**
-     * A convenience method to add all local NetworkInterfaces - it simply runs
-     * <pre>
-     * for (Enumeration&lt;NetworkInterface&gt; e = NetworkInterface.getNetworkInterfaces();e.hasMoreElements();) {
-     *     addNetworkInterface(e.nextElement());
-     * }
-     * </pre>
-     * @throws IOException if something goes wrong in an I/O way
-     * @return this
-     */
-    public Zeroconf addAllNetworkInterfaces() throws IOException {
-        for (Enumeration<NetworkInterface> e = NetworkInterface.getNetworkInterfaces();e.hasMoreElements();) {
-            addNetworkInterface(e.nextElement());
-        }
-        return this;
+    public Collection<NetworkInterface> getNetworkInterfaces() {
+        return nics;
     }
 
     /**
@@ -187,7 +222,7 @@ public class Zeroconf {
     }
 
     /**
-     * Get the local hostname, which defaults to <code>InetAddress.getLocalHost().getHostName()</code>.
+     * Get the local hostname, which defaults to <code>InetAddress.getLocalHost().getHostName()</code>
      * @return the local host name
      */
     public String getLocalHostName() {
@@ -198,7 +233,9 @@ public class Zeroconf {
     }
 
     /**
-     * Set the local hostname, as returned by {@link #getLocalHostName}
+     * Set the local hostname, as returned by {@link #getLocalHostName}.
+     * It should not have a dot - the fully-qualified name will be created by appending
+     * this value to {@link #getDomain}
      * @param name the hostname, which should be undotted
      * @return this
      */
@@ -221,17 +258,10 @@ public class Zeroconf {
         return thread.getLocalAddresses();
     }
 
-    /**
-     * Send a packet
-     */
-    void send(Packet packet) {
-        thread.push(packet);
-    }
-
     /** 
      * Return the list of all Services that have been {@link Service#announce announced}
-     * by this object. The returned Collection is read-only and live, so will be updated
      * by this object.
+     * The returned Collection is read-only, thread-safe without synchronization and live - it will be updated by this object.
      * @return the Collection of announced Services
      */
     public Collection<Service> getAnnouncedServices() {
@@ -240,25 +270,36 @@ public class Zeroconf {
 
     /** 
      * Return the list of all Services that have been heard by this object.
-     * The returned Collection is read-only and live, so will be updated by this object.
-     * @return the Collection of announced Services
+     * It may contain Services that are also in {@link #getAnnouncedServices}
+     * The returned Collection is read-only, thread-safe without synchronization and live - it will be updated by this object.
+     * @return the Collection of Services
      */
     public Collection<Service> getServices() {
         return Collections.unmodifiableCollection(heardServices.values());
     }
 
+    /**
+     * Return the list of type names that have been heard by this object, eg "_http._tcp.local"
+     * The returned Collection is read-only, thread-safe without synchronization and live - it will be updated by this object.
+     * @return the Collection of type names.
+     */
     public Collection<String> getServiceTypes() {
         return Collections.unmodifiableCollection(heardServiceTypes);
     }
 
+    /**
+     * Return the list of fully-qualified service names that have been heard by this object
+     * The returned Collection is read-only, thread-safe without synchronization and live - it will be updated by this object.
+     * @return the Collection of fully-qualfied service names.
+     */
     public Collection<String> getServiceNames() {
         return Collections.unmodifiableCollection(heardServiceNames);
     }
      
     /**
-     * Probe for the specified service. Responses will typically come in over the
-     * next second or so and can be queried by {@link #getServices}
-     * @param type the service type, eg "_http._tcp" ({@link #getDomain} will be appended if necessary), or null to discover services
+     * Send a query to the network to probe for types or services.
+     * Any responses will trigger changes to the list of services, and usually arrive within a second or two.
+     * @param type the service type, eg "_http._tcp" ({@link #getDomain} will be appended if necessary), or null to query for known types
      * @param name the service instance name, or null to discover services of the specified type
      */
     public void query(String type, String name) {
@@ -287,10 +328,12 @@ public class Zeroconf {
         }
     }
 
-    /**
-     * Announce the service - probe to see if it already exists and fail if it does, otherwise
-     * announce it
-     */
+    //--------------------------------------------------------------------
+
+    void send(Packet packet) {
+        thread.push(packet);
+    }
+
     boolean announce(Service service) {
         if (announceServices.containsKey(service)) {
             return false;
@@ -333,10 +376,14 @@ public class Zeroconf {
         if (match.get()) {
             return false;
         }
+        reannounce(service);
+        return true;
+    }
+
+    private void reannounce(Service service) {
         Packet packet = new Packet(service);
         announceServices.put(service, packet);
         send(packet);
-        return true;
     }
 
     /**
@@ -362,14 +409,14 @@ public class Zeroconf {
     private class ListenerThread extends Thread {
         private volatile boolean cancelled;
         private Deque<Packet> sendq;
-        private Map<NetworkInterface,SelectionKey> channels;
+        private List<NicSelectionKey> channels;
         private Map<NetworkInterface,List<InetAddress>> localAddresses;
         private Selector selector;
 
         ListenerThread() {
             setDaemon(true);
             sendq = new ArrayDeque<Packet>();
-            channels = new HashMap<NetworkInterface,SelectionKey>();
+            channels = new ArrayList<NicSelectionKey>();
             localAddresses = new HashMap<NetworkInterface,List<InetAddress>>();
         }
 
@@ -412,52 +459,149 @@ public class Zeroconf {
         }
 
         /**
-         * Add a NetworkInterface. Try to idenfity whether it's IPV4 or IPV6, or both. IPV4 tested,
-         * IPV6 is not but at least it doesn't crash.
+         * Add a NetworkInterface.
          */
-        public synchronized void addNetworkInterface(NetworkInterface nic) throws IOException {
-            if (!channels.containsKey(nic) && nic.supportsMulticast() && nic.isUp() && !nic.isLoopback()) {
-                boolean ipv4 = false, ipv6 = false;
-                System.out.print("Adding "+nic+": ");
-                List<InetAddress> locallist = new ArrayList<InetAddress>();
-                for (Enumeration<InetAddress> e = nic.getInetAddresses();e.hasMoreElements();) {
-                    InetAddress a = e.nextElement();
-                    ipv4 |= a instanceof Inet4Address;
-                    ipv6 |= a instanceof Inet4Address;
-                    System.out.print(a);
-                    if (!a.isLoopbackAddress() && !a.isMulticastAddress()) {
-                        locallist.add(a);
+        void addNetworkInterface(NetworkInterface nic) throws IOException {
+            boolean changed = false;
+            synchronized(this) {
+                if (!localAddresses.containsKey(nic) && nic.supportsMulticast() && !nic.isLoopback()) {
+                    localAddresses.put(nic, new ArrayList<InetAddress>());
+                    changed = processTopologyChange(nic, false);
+                    if (changed) {
+                        if (!isAlive()) {
+                            start();
+                        } else {
+                            getSelector().wakeup();
+                        }
                     }
                 }
-                System.out.println();
-
-                DatagramChannel channel = DatagramChannel.open(StandardProtocolFamily.INET);
-                channel.configureBlocking(false);
-                channel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
-                channel.setOption(StandardSocketOptions.IP_MULTICAST_TTL, 255);
-                if (ipv4) {
-                    channel.bind(new InetSocketAddress(BROADCAST4.getPort()));
-                    channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
-                    channel.join(BROADCAST4.getAddress(), nic);
-                } else if (ipv6) {
-                    channel.bind(new InetSocketAddress(BROADCAST6.getPort()));
-                    channel.join(BROADCAST6.getAddress(), nic);
-                }
-                channels.put(nic, channel.register(getSelector(), SelectionKey.OP_READ));
-                localAddresses.put(nic, locallist);
-                if (!isAlive()) {
-                    start();
+            }
+            if (changed) {
+                for (ZeroconfListener listener : listeners) {
+                    try {
+                        listener.topologyChange(nic);
+                    } catch (Exception e) {
+                        log("Listener exception", e);
+                    }
                 }
             }
         }
 
-        synchronized void removeNetworkInterface(NetworkInterface nic) throws IOException {
-            SelectionKey key = channels.remove(nic);
-            if (key != null) {
-                localAddresses.remove(nic);
-                key.channel().close();
-                getSelector().wakeup();
+        void removeNetworkInterface(NetworkInterface nic) throws IOException, InterruptedException {
+            boolean changed = false;
+            synchronized(this) {
+                if (localAddresses.containsKey(nic)) {
+                    changed = processTopologyChange(nic, true);
+                    localAddresses.remove(nic);
+                    if (localAddresses.isEmpty()) {
+                        close();
+                    } else if (changed) {
+                        getSelector().wakeup();
+                    }
+                }
             }
+            if (changed) {
+                for (ZeroconfListener listener : listeners) {
+                    try {
+                        listener.topologyChange(nic);
+                    } catch (Exception e) {
+                        log("Listener exception", e);
+                    }
+                }
+            }
+        }
+
+
+        private boolean processTopologyChange(NetworkInterface nic, boolean remove) throws IOException {
+            List<InetAddress> oldlist = localAddresses.get(nic);
+            List<InetAddress> newlist = new ArrayList<InetAddress>();
+            boolean ipv4 = false, ipv6 = false;
+            if (nic.isUp() && !remove) {
+                for (Enumeration<InetAddress> e = nic.getInetAddresses();e.hasMoreElements();) {
+                    InetAddress a = e.nextElement();
+                    if (!a.isLoopbackAddress() && !a.isMulticastAddress()) {
+                        ipv4 |= a instanceof Inet4Address;
+                        ipv6 |= a instanceof Inet6Address;
+                        newlist.add(a);
+                    }
+                }
+            }
+            boolean changed = false;
+            if (oldlist.isEmpty() && !newlist.isEmpty()) {
+                if (ipv4) {
+                    try {
+                        DatagramChannel channel = DatagramChannel.open(StandardProtocolFamily.INET);
+                        channel.configureBlocking(false);
+                        channel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+                        channel.setOption(StandardSocketOptions.IP_MULTICAST_TTL, 255);
+                        channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
+                        channel.bind(new InetSocketAddress(PORT));
+                        channel.join(BROADCAST4.getAddress(), nic);
+                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ)));
+                    } catch (Exception e) {
+                        // Don't report, this method is called regularly and what is the user going to do about it?
+                        // e.printStackTrace();
+                        ipv4 = false;
+                        for (int i=0;i<newlist.size();i++) {
+                            if (newlist.get(i) instanceof Inet4Address) {
+                                newlist.remove(i--);
+                                
+                            }
+                        }
+                    }
+                }
+                if (ipv6) {
+                    try {
+                        DatagramChannel channel = DatagramChannel.open(StandardProtocolFamily.INET6);
+                        channel.configureBlocking(false);
+                        channel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+                        channel.setOption(StandardSocketOptions.IP_MULTICAST_TTL, 255);
+                        channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
+                        channel.bind(new InetSocketAddress(PORT));
+                        channel.join(BROADCAST6.getAddress(), nic);
+                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ)));
+                    } catch (Exception e) {
+                        // Don't report, this method is called regularly and what is the user going to do about it?
+                        // e.printStackTrace();
+                        ipv6 = false;
+                        for (int i=0;i<newlist.size();i++) {
+                            if (newlist.get(i) instanceof Inet6Address) {
+                                newlist.remove(i--);
+                            }
+                        }
+                    }
+                }
+                if (!newlist.isEmpty()) {
+                    oldlist.addAll(newlist);
+                    changed = true;
+                }
+            } else if (!oldlist.isEmpty() && newlist.isEmpty()) {
+                for (int i=0;i<channels.size();i++) {
+                    NicSelectionKey nsk = channels.get(i);
+                    if (nsk.nic == nic) {
+                        nsk.key.channel().close();
+                        channels.remove(i--);
+                    }
+                }
+                oldlist.clear();
+                changed = true;
+            } else {
+                for (Iterator<InetAddress> i = oldlist.iterator();i.hasNext();) {
+                    InetAddress a = i.next();
+                    if (!newlist.contains(a)) {
+                        i.remove();
+                        changed = true;
+                    }
+                }
+                for (Iterator<InetAddress> i = newlist.iterator();i.hasNext();) {
+                    InetAddress a = i.next();
+                    if (!oldlist.contains(a)) {
+                        oldlist.add(a);
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
         }
 
         synchronized List<InetAddress> getLocalAddresses() {
@@ -475,6 +619,14 @@ public class Zeroconf {
         public void run() {
             ByteBuffer buf = ByteBuffer.allocate(65536);
             buf.order(ByteOrder.BIG_ENDIAN);
+            try {
+                // This bodge is to cater for the special case where someone does
+                // Zeroconf zc = new Zeroconf();
+                // zc.getInterfaces().clear();
+                // We don't want to start then stop, so give it a fraction of a second.
+                // Not the end of the world if it happens
+                Thread.sleep(100);
+            } catch (InterruptedException e) {}
             while (!cancelled) {
                 buf.clear();
                 try {
@@ -485,10 +637,14 @@ public class Zeroconf {
                         packet.write(buf);
                         buf.flip();
                         for (ZeroconfListener listener : listeners) {
-                            listener.packetSent(packet);
+                            try {
+                                listener.packetSent(packet);
+                            } catch (Exception e) {
+                                log("Listener exception", e);
+                            }
                         }
-                        for (SelectionKey key : channels.values()) {
-                            DatagramChannel channel = (DatagramChannel)key.channel();
+                        for (NicSelectionKey nsk : channels) {
+                            DatagramChannel channel = (DatagramChannel)nsk.key.channel();
                             InetSocketAddress address = packet.getAddress();
                             if (address != null) {
                                 channel.send(buf, address);
@@ -519,18 +675,54 @@ public class Zeroconf {
                     selected.clear();
 
                     processExpiry();
-                    processTopologyChange();
+                    List<NetworkInterface> changed = null;
+                    synchronized(this) {
+                        for (NetworkInterface nic : localAddresses.keySet()) {
+                            if (processTopologyChange(nic, false)) {
+                                if (changed == null) {
+                                    changed = new ArrayList<NetworkInterface>();
+                                }
+                                changed.add(nic);
+                            }
+                        }
+                    }
+                    if (changed != null) {      // Reannounce all services
+                        for (Service service : getAnnouncedServices()) {
+                            reannounce(service);
+                        }
+                        for (NetworkInterface nic : changed) {
+                            for (ZeroconfListener listener : listeners) {
+                                try {
+                                    listener.topologyChange(nic);
+                                } catch (Exception e) {
+                                    log("Listener exception", e);
+                                }
+                            }
+                        }
+                    }
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    log("ListenerThread exception", e);
                 }
             }
         }
+    }
 
+    private static class NicSelectionKey {
+        final NetworkInterface nic;
+        final SelectionKey key;
+        NicSelectionKey(NetworkInterface nic, SelectionKey key) {
+            this.nic = nic;
+            this.key = key;
+        }
     }
 
     private void processPacket(Packet packet) {
         for (ZeroconfListener listener : listeners) {
-            listener.packetReceived(packet);
+            try {
+                listener.packetReceived(packet);
+            } catch (Exception e) {
+                log("Listener exception", e);
+            }
         }
         processQuestions(packet);
         Collection<Service> mod = null, add = null;
@@ -569,14 +761,22 @@ public class Zeroconf {
             }
             for (Service service : mod) {
                 for (ZeroconfListener listener : listeners) {
-                    listener.serviceModified(service);
+                    try {
+                        listener.serviceModified(service);
+                    } catch (Exception e) {
+                        log("Listener exception", e);
+                    }
                 }
             }
         }
         if (add != null) {
             for (Service service : add) {
                 for (ZeroconfListener listener : listeners) {
-                    listener.serviceAnnounced(service);
+                    try {
+                        listener.serviceAnnounced(service);
+                    } catch (Exception e) {
+                        log("Listener exception", e);
+                    }
                 }
             }
         }
@@ -642,13 +842,21 @@ public class Zeroconf {
             String type = r.getPtrValue();
             if (heardServiceTypes.add(type)) {
                 for (ZeroconfListener listener : listeners) {
-                    listener.typeNamed(type);
+                    try {
+                        listener.typeNamed(type);
+                    } catch (Exception e) {
+                        log("Listener exception", e);
+                    }
                 }
                 expire(type, r.getTTL(), new Runnable() {
                     public void run() {
                         heardServiceTypes.remove(type);
                         for (ZeroconfListener listener : listeners) {
-                            listener.typeNameExpired(type);
+                            try {
+                                listener.typeNameExpired(type);
+                            } catch (Exception e) {
+                                log("Listener exception", e);
+                            }
                         }
                     }
                 });
@@ -658,13 +866,21 @@ public class Zeroconf {
             final String fqdn = r.getPtrValue();        // Will be a service FQDN
             if (heardServiceTypes.add(type)) {
                 for (ZeroconfListener listener : listeners) {
-                    listener.typeNamed(type);
+                    try {
+                        listener.typeNamed(type);
+                    } catch (Exception e) {
+                        log("Listener exception", e);
+                    }
                 }
                 expire(type, r.getTTL(), new Runnable() {
                     public void run() {
                         heardServiceTypes.remove(type);
                         for (ZeroconfListener listener : listeners) {
-                            listener.typeNameExpired(type);
+                            try {
+                                listener.typeNameExpired(type);
+                            } catch (Exception e) {
+                                log("Listener exception", e);
+                            }
                         }
                     }
                 });
@@ -673,19 +889,31 @@ public class Zeroconf {
                 if (fqdn.endsWith(type)) {
                     final String name = fqdn.substring(0, fqdn.length() - type.length() - 1);
                     for (ZeroconfListener listener : listeners) {
-                        listener.serviceNamed(type, name);
+                        try {
+                            listener.serviceNamed(type, name);
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                     expire(fqdn, r.getTTL(), new Runnable() {
                         public void run() {
                             heardServiceNames.remove(fqdn);
                             for (ZeroconfListener listener : listeners) {
-                                listener.serviceNameExpired(type, name);
+                                try {
+                                    listener.serviceNameExpired(type, name);
+                                } catch (Exception e) {
+                                    log("Listener exception", e);
+                                }
                             }
                         }
                     });
                 } else {
                     for (ZeroconfListener listener : listeners) {
-                        listener.packetError(packet, "PTR name " + Service.quote(fqdn) + " doesn't end with type " + Service.quote(type));
+                        try {
+                            listener.packetError(packet, "PTR name " + Service.quote(fqdn) + " doesn't end with type " + Service.quote(type));
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                     service = null;
                 }
@@ -697,11 +925,24 @@ public class Zeroconf {
             if (service == null) {
                 List<String> l = Service.splitFQDN(fqdn);
                 if (l != null) {
-                    service = new Service(Zeroconf.this, fqdn, l.get(0), l.get(1), l.get(2));
-                    modified = true;
+                    for (Service s : getAnnouncedServices()) {
+                        if (s.getFQDN().equals(fqdn)) {
+                            service = s;
+                            modified = true;
+                            break;
+                        }
+                    }
+                    if (service == null && r.getTTL() != 0) {
+                        service = new Service(Zeroconf.this, fqdn, l.get(0), l.get(1), l.get(2));
+                        modified = true;
+                    }
                 } else {
                     for (ZeroconfListener listener : listeners) {
-                        listener.packetError(packet, "Couldn't split SRV name " + Service.quote(fqdn));
+                        try {
+                            listener.packetError(packet, "Couldn't split SRV name " + Service.quote(fqdn));
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                 }
             }
@@ -710,11 +951,23 @@ public class Zeroconf {
                     modified = true;
                 }
                 final Service fservice = service;
+                int ttl = r.getTTL();
+                if (getAnnouncedServices().contains(service)) {
+                    ttl = Math.min(ttl * 9/10, ttl - 5);        // Refresh at 90% of expiry or at least 5s before
+                }
                 expire(service, r.getTTL(), new Runnable() {
                     public void run() {
-                        heardServices.remove(fservice);
-                        for (ZeroconfListener listener : listeners) {
-                            listener.serviceExpired(fservice);
+                        if (getAnnouncedServices().contains(fservice)) {
+                            reannounce(fservice);
+                        } else {
+                            heardServices.remove(fqdn);
+                            for (ZeroconfListener listener : listeners) {
+                                try {
+                                    listener.serviceExpired(fservice);
+                                } catch (Exception e) {
+                                    log("Listener exception", e);
+                                }
+                            }
                         }
                     }
                 });
@@ -740,7 +993,11 @@ public class Zeroconf {
                     public void run() {
                         if (fservice.setText(null)) {
                             for (ZeroconfListener listener : listeners) {
-                                listener.serviceModified(fservice);
+                                try {
+                                    listener.serviceModified(fservice);
+                                } catch (Exception e) {
+                                    log("Listener exception", e);
+                                }
                             }
                         }
                     }
@@ -767,7 +1024,11 @@ public class Zeroconf {
                     public void run() {
                         if (fservice.removeAddress(address)) {
                             for (ZeroconfListener listener : listeners) {
-                                listener.serviceModified(fservice);
+                                try {
+                                    listener.serviceModified(fservice);
+                                } catch (Exception e) {
+                                    log("Listener exception", e);
+                                }
                             }
                         }
                     }
@@ -793,9 +1054,6 @@ public class Zeroconf {
         }
     }
 
-    private void processTopologyChange() {
-    }
-
     private void expire(Object key, int ttl, Runnable task) {
         expiry.put(key, new ExpiryTask(System.currentTimeMillis() + ttl * 1000, task));
     }
@@ -807,6 +1065,10 @@ public class Zeroconf {
             this.expiry = expiry;
             this.task = task;
         }
+    }
+
+    private static void log(String message, Exception e) {
+        System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.ERROR, message, e);
     }
 
 }

@@ -7,17 +7,17 @@ import java.util.*;
 import java.net.*;
 
 /**
- * Base class for a DNS record
+ * A single DNS record - a Packet has multiple Records.
  */
 final class Record {
 
     static final int TYPE_A     = 0x01;
-    static final int TYPE_CNAME = 0x05;
+    static final int TYPE_CNAME = 0x05; // Not used by dns-sd
     static final int TYPE_PTR   = 0x0C;
     static final int TYPE_TXT   = 0x10;
     static final int TYPE_AAAA  = 0x1C;
     static final int TYPE_SRV   = 0x21;
-    static final int TYPE_NSEC  = 0x2F;
+    static final int TYPE_NSEC  = 0x2F; // Not used by dns-sd
     static final int TYPE_ANY   = 0xFF;
     private static final int CLAZZ = 0x8001;
 
@@ -99,6 +99,8 @@ final class Record {
     }
 
     //----------------------------------------------------
+    // Static creation methods
+    //----------------------------------------------------
 
     /**
      * Create a new Question
@@ -126,11 +128,6 @@ final class Record {
         }
     }
 
-    /**
-     * Create a new PTR record
-     * @param name the name
-     * @param value the value
-     */
     static Record newPtr(String name, String value) {
         if (name == null || value == null) {
             throw new IllegalArgumentException("name or value is null");
@@ -152,6 +149,8 @@ final class Record {
         return new Record(TYPE_TXT, CLAZZ, 4500, name, map);
     }
 
+    //----------------------------------------------------
+    // Static methods for reading/writing
     //----------------------------------------------------
 
     static Record readAnswer(ByteBuffer in) {
@@ -190,7 +189,7 @@ final class Record {
                         }
                     }
                 }
-                data = map;
+                data = Collections.<String,String>unmodifiableMap(map);
             } else {
 //                System.out.println("UNKNOWN TYPE " + type+" len="+len);
                 byte[] buf = new byte[len];
@@ -301,7 +300,7 @@ final class Record {
     private static byte[] writeString(String s) {
         byte[] b = s.getBytes(StandardCharsets.UTF_8);
         if (b.length > 255) {
-            throw new UnsupportedOperationException("Not implemented yet");
+            throw new UnsupportedOperationException("String too long (" + b.length +" bytes)");
         }
         byte[] out = new byte[b.length + 1];
         out[0] = (byte)b.length;
@@ -314,21 +313,14 @@ final class Record {
         int len = in.get() & 0xFF;
         if (len == 0) {
             return "";
-        } else if (true || len < 0x40) {
+        } else {
             String s = new String(in.array(), in.position(), len, StandardCharsets.UTF_8);
             in.position(in.position() + len);
             return s;
-        } else {
-            int off = ((len & 0x3F) << 8) | (in.get() & 0xFF);       // Offset from start of packet
-            len = in.get(off++) & 0xFF;
-            String s = new String(in.array(), off, len, StandardCharsets.UTF_8);
-            return s;
         }
-//        return readName(in);
     }
 
     private static String readName(ByteBuffer in) {
-        // See https://courses.cs.duke.edu/fall16/compsci356/DNS/DNS-primer.pdf
 //        System.out.println("STRINGLIST: " + Packet.dump(in));
         StringBuilder sb = new StringBuilder();
         int len;

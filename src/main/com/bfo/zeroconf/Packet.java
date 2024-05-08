@@ -5,7 +5,7 @@ import java.util.*;
 import java.nio.*;
 
 /**
- * A Service Dicovery Packet. This class is only of interest to developers.
+ * A Service Dicovery Packet. This class is only of interest to developers,
  */
 public class Packet {
 

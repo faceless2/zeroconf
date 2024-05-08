@@ -4,8 +4,9 @@ import java.net.*;
 import java.util.*;
 
 /**
- * Service represents a Service to be announced by the Zeroconf class. It is created
- * by the {@link Zeroconf#newService Zeroconf.newService()} method.
+ * Service represents a new Service to be announced by the Zeroconf class,
+ * or an existing service which has been announced on the network.
+ * To create a new Service, see the {@link Service.Builder} subclass.
  */
 public class Service {
 
@@ -34,6 +35,14 @@ public class Service {
         this.name = l.get(0);
         this.type = l.get(1);
         this.domain = l.get(2);
+    }
+
+    /**
+     * Return the Zeroconf object this Service is assigned to
+     * @return the zeroconf
+     */
+    public Zeroconf getZeroconf() {
+        return zeroconf;
     }
 
     /**
@@ -117,7 +126,12 @@ public class Service {
         return addresses != null && addresses.remove(address);
     }
 
-    String getFQDN() {
+    /**
+     * Return the fully-qualified domain name for this Service,
+     * which also serves as a unique key.
+     * @return the FQDN
+     */
+    public String getFQDN() {
         return fqdn;
         /*
         StringBuilder sb = new StringBuilder();
@@ -161,6 +175,7 @@ public class Service {
 
     /**
      * Return the port for the service
+     * @return the port
      */
     public int getPort() {
         return port;
@@ -168,9 +183,12 @@ public class Service {
 
     /**
      * Return the named host for this service
+     * @return the host
      */
     public String getHost() {
         if (host == null) {
+            // Done this way on the theory that the local host name may change,
+            // and if it does we want this to update automatically.
             return zeroconf.getLocalHostName() + zeroconf.getDomain();
         } else {
             return host;
@@ -179,6 +197,7 @@ public class Service {
 
     /** 
      * Return an unmodifiable map containing the text
+     * @return the text
      */
     public Map<String,String> getText() {
         return text == null ? Collections.<String,String>emptyMap() : text;
@@ -186,9 +205,12 @@ public class Service {
 
     /** 
      * Return an unmodifiable list containing the addresses
+     * @return the list of addresses
      */
     public List<InetAddress> getAddresses() {
         if (addresses == null) {
+            // Done this way on the theory that the local addresses may change,
+            // and if it does we want this to update automatically.
             return zeroconf.getLocalAddresses();
         } else {
             return Collections.<InetAddress>unmodifiableList(addresses);
@@ -196,9 +218,8 @@ public class Service {
     }
 
     /**
-     * Announce this Service on the network. Services can be announced more than once, although I'm unsure
-     * if this is valid
-     * @return this
+     * Announce this Service on the network.
+     * @return true if the service was announced, false if it already exists on the network.
      */
     public boolean announce() {
         return zeroconf.announce(this);
@@ -206,22 +227,25 @@ public class Service {
 
     /** 
      * Cancel the announcement of this Service on the Network
-     * @return this
+     * @return true if the service was announced and is now cancelled, false if it was not announced or announced by someone else.
      */
     public boolean cancel() {
         return zeroconf.unannounce(this);
     }
 
     public int hashCode() {
-        int hc = getName().hashCode();
-        hc ^= getHost().hashCode();
-        return hc;
+        return getFQDN().hashCode();
     }
 
+    /**
+     * Two services are equal if they have the same {@link #getFQDN FQDN} and belong to the same {@link Zeroconf} object
+     * @param o the object
+     * @return true if the services are equal
+     */
     public boolean equals(Object o) {
         if (o instanceof Service) {
             Service s = (Service)o;
-            return getName().equals(s.getName()) && getHost().equals(s.getHost());
+            return s.zeroconf == zeroconf && s.getFQDN().equals(getFQDN());
         }
         return false;
     }
@@ -300,12 +324,20 @@ public class Service {
         return sb.toString();
     }
 
+    /**
+     * A Builder class to create a new {@link Service} for announcement
+     */
     public static class Builder {
         private String name, type, domain, host;
-        private int port;
+        private int port = -1;
         private Map<String,String> props = new LinkedHashMap<String,String>();
         private List<InetAddress> addresses = new ArrayList<InetAddress>();
 
+        /**
+         * (Required) Set the instance name
+         * @param name the name
+         * @return this
+         */
         public Builder setName(String name) {
             if (name == null || name.length() == 0) {
                 throw new IllegalArgumentException("Empty name");
@@ -319,6 +351,14 @@ public class Service {
             this.name = name;
             return this;
         }
+
+        /**
+         * Set the fully qualifier host name - it should contain a domain.
+         * If not set, will be generated from {@link Zeroconf#getLocalHostName} and the domain,
+         * from {@link #setDomain} or {@link Zeroconf#getDomain}
+         * @param host the host. 
+         * @return this
+         */
         public Builder setHost(String host) {
             if (host != null && host.length() == 0) {
                 throw new IllegalArgumentException("Invalid host");
@@ -326,6 +366,12 @@ public class Service {
             this.host = host;
             return this;
         }
+        /**
+         * (Required) Set the service type - a combination of the service name and protocol, eg "_http._tcp"
+         * Both name and protocol must begin with an underscore and be separated by a single dot.
+         * @param type the type
+         * @return this
+         */
         public Builder setType(String type) {
             int ix;
             if (type == null || (ix=type.indexOf(".")) < 0 || type.length() < 2 || ix + 1 >= type.length() || type.charAt(0) != '_' || type.charAt(ix + 1) != '_') {
@@ -334,6 +380,11 @@ public class Service {
             this.type = type;
             return this;
         }
+        /**
+         * Set the domain, eg ".local". If not set this defaults to {@link Zeroconf#getDomain}
+         * @param domain the domain
+         * @return this
+         */
         public Builder setDomain(String domain) {
             if (domain != null && (domain.length() < 2 || domain.charAt(0) != '.')) {
                 throw new IllegalArgumentException("Invalid domain: must start with dot, eg \".local\"");
@@ -341,6 +392,12 @@ public class Service {
             this.domain = domain;
             return this;
         }
+        /**
+         * Set the fully-qualified domain name of this service, eg "My Service._http._tcp.local".
+         * Can be called as an alternative to calling {@link #setName}, {@link #setType} and {@link #setDomain}
+         * @param fqdn the fully-qualified domain name
+         * @return this
+         */
         public Builder setFQDN(String fqdn) {
             List<String> l = splitFQDN(fqdn);
             if (l != null) {
@@ -352,13 +409,24 @@ public class Service {
             }
             return this;
         }
+        /**
+         * (Required) Set the port to announce. 
+         * @param port the port, between 0 and 65535. A value of zero means no port.
+         * @return this
+         */
         public Builder setPort(int port) {
-            if (port < 1 || port > 65535) {
+            if (port < 0 || port > 65535) {
                 throw new IllegalArgumentException("Invalid port");
             }
             this.port = port;
             return this;
         }
+        /**
+         * Add a text value to the Service
+         * @param key the text key
+         * @param value the text value. If this is null, the key will be added without any "="
+         * @return this
+         */
         public Builder put(String key, String value) {
             if (value == null) {
                 props.remove(key);
@@ -367,16 +435,32 @@ public class Service {
             }
             return this;
         }
+        /**
+         * Add text values from the supplied Map to the Service
+         * @param map the map
+         * @return this
+         */
         public Builder putAll(Map<String,String> map) {
             props.putAll(map);
             return this;
         }
+        /**
+         * Add an internet address to the Service. If not specified, the addresses
+         * from {@link Zeroconf#getLocalAddresses} will be used
+         * @param address the address
+         * @return this
+         */
         public Builder addAddress(InetAddress address) {
             if (address != null) {
                 addresses.add(address);
             }
             return this;
         }
+        /**
+         * Build a new Service which can be announced with {@link Service#announce}
+         * @param zeroconf the Zeroconf instance to bind this Service to
+         * @return the new Service
+         */
         public Service build(Zeroconf zeroconf) {
             if (name == null) {
                 throw new IllegalStateException("Name is required");
@@ -384,7 +468,7 @@ public class Service {
             if (type == null) {
                 throw new IllegalStateException("Type is required");
             }
-            if (port == 0) {
+            if (port < 0) {
                 throw new IllegalStateException("Port is required");
             }
             if (domain == null) {
@@ -392,6 +476,14 @@ public class Service {
             }
             if (host == null && zeroconf.getLocalHostName() == null) {
                 throw new IllegalStateException("Host is required (cannot be determined automatically)");
+            }
+            if (!props.isEmpty()) {
+                try {
+                    Record r = Record.newTxt("text", props);
+                    r.write(java.nio.ByteBuffer.allocate(8192));
+                } catch (Exception e) {
+                    throw (RuntimeException)new IllegalStateException("TXT record is too large").initCause(e);
+                }
             }
             StringBuilder sb = new StringBuilder();
             for (int i=0;i<name.length();i++) {
@@ -405,7 +497,6 @@ public class Service {
             sb.append(type);
             sb.append(domain);
             Service service = new Service(zeroconf, sb.toString(), name, type, domain);
-            System.out.println("MADE " + service);
             service.setHost(host, port);
             if (!addresses.isEmpty()) {
                 service.addresses = new ArrayList<InetAddress>();
@@ -414,7 +505,7 @@ public class Service {
                 }
             }
             if (!props.isEmpty()) {
-                service.setText(props);
+                service.setText(Collections.<String,String>unmodifiableMap(props));
             }
             return service;
         }

@@ -92,6 +92,6 @@
     </java>
   </target>
 
-  <target name="default" depends="test,javadoc"></target>
+  <target name="default" depends="build,javadoc"></target>
 
 </project>

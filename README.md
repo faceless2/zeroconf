@@ -1,30 +1,50 @@
-# CU-Zeroconf
+# Zeroconf
 
-CU-Zeroconf is a very simple Java implementation of Multicast DNS Service Discovery, aka the service discovery bit of Zeroconf. It was written in response to the authors unpublishable opinions on the only other existing pure-Java implementation at https://github.com/jmdns/jmdns, which claims to be correct. It may well be.
+Zeroconf is a simple Java implementation of Multicast DNS Service Discovery, aka the service discovery bit of Zeroconf.
+Originally written as a quick hack to avoid having to use https://github.com/jmdns/jmdns, it has evolved into something
+that can both announce and listen for Services on multiple interfaces (IPv4 and IPv6), including properly dealing with
+changes to those interfaces.
 
-This implementation is not correct, but it tries to make up for that by being simple, documented and readable. It has been cobbled together in 8 hours from a skim read of one or two specifications and a glance at some implementations in other languages. It is certainly less fully-featured, as it currently only supports announcing new services, and it may not even do that properly. However it does successfully announce a service in a way that Zeroconf clients seem to recognise, on one _or more_ local NetworkInterfaces, without immediately hanging, which for me at least is progress. It does this using a single Thread and a selector (from the java.nio.channels) package.
+There are no external dependencies. Needs Java 11 or later.
 
-Here's a simple working example:
+Here's a simple example for announcing:
 
 ```java
-Zeroconf zeroconf = new Zeroconf();
-zeroconf.addAllNetworkInterfaces();
-Service service = zeroconf.newService("MyWeb", "http", 8080).putText("path", "/path/toservice").announce();
+Zeroconf zc = new Zeroconf();
+Service service = new Service.Builder().setName("MyWeb").setType("_http._tcp").setPort(8080).put("path", "/path/toservice").build(zc);
+service.announce();
 // time passes
 service.cancel();
 // time passes
-zeroconf.close();
+zc.close();
 ```
 
-There is considerable room for improvement:
+And to listen, either add a Listener for events, or use the live, thread-safe Collection of Services.
 
-* IPV6 is largely untested, although it appears to work.
-* There's no facility to search for services, just to announce them. However it's not a great leap to add this - the facility is there to create queries and receive responses.
-* The addition of a monitor class to track and automatically update Zeroconf objects with changes to NetworkInterface topology would be nice.
-* The responses to incoming queries are very simple, because I couldn't be bothered to read the spec to see how to do it properly. I think we should skip existing answers, but that's not implemented. We respond authoritively to queries for A and AAAA records that we have published as part of a Service announcement - I'm unsure if this is correct, but it doesn't seem to break anything,
-
+```java
+Zeroconf zc = new Zeroconf();
+zc.addListener(new ZeroconfListener() {
+  public void serviceNamed(String type, String name) {
+    if ("_http._tcp.local".equals(type)) {
+      zc.query(type, name);  // Ask for details on any announced HTTP services
+    }
+  }
+  public void serviceAnnounced(Service service) {
+    // A new service has just been announced
+  }
+});
+zc.query("_http._tcp.local", null); // Ask for any HTTP services
+// time passes
+for (Service s : zc.getServices()) {
+  if (s.getType().equals("_http._tcp") {
+     // A service has been announced at some point in the past, and has not yet expired.
+   }
+}
+// time passes
+zc.close();
+```
 
 To build
 --
 
-Run "ant". There are no external dependencies. Needs Java 7 or later, although only tested under Java 8
+Run `ant` to build the Jar in the `build` directry, and javadoc in the `doc` directory.
