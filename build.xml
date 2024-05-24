@@ -1,4 +1,4 @@
-<project name="dnssd" default="default" xmlns:if="ant:if">
+<project name="zeroconf" default="default" xmlns:if="ant:if">
   <property name="build.sysclasspath" value="ignore"/>
   <property file="build.properties"/>
 
