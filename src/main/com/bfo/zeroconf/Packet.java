@@ -12,7 +12,7 @@ public class Packet {
     private final int id;
     private final int flags;
     private final List<Record> questions, answers, authorities, additionals;
-    private InetSocketAddress address;
+    private final NetworkInterface nic;
 
     private static final int FLAG_RESPONSE = 15;
     private static final int FLAG_AA       = 10;
@@ -27,7 +27,7 @@ public class Packet {
         this.flags = 0;
         this.questions = Collections.<Record>singletonList(question);
         this.answers = this.additionals = this.authorities = Collections.<Record>emptyList();
-        this.address = null;
+        this.nic = null;
     }
 
     /**
@@ -38,6 +38,7 @@ public class Packet {
      */
     Packet(Packet question, List<Record> answers, List<Record> additionals) {
         this.id = question.id;
+        this.nic = question.nic;
         if (additionals == null) {
             additionals = Collections.<Record>emptyList();
         }
@@ -59,9 +60,7 @@ public class Packet {
         List<Record> additionals = new ArrayList<Record>();
         answers.add(Record.newPtr(domain, fqdn));
         answers.add(Record.newSrv(fqdn, service.getHost(), service.getPort(), 0, 0));
-        if (!service.getText().isEmpty()) {
-            additionals.add(Record.newTxt(fqdn, service.getText()));
-        }
+        answers.add(Record.newTxt(fqdn, service.getText()));    // Seems "txt" is always required
         for (InetAddress address : service.getAddresses()) {
             additionals.add(Record.newAddress(service.getHost(), address));
         }
@@ -71,7 +70,7 @@ public class Packet {
         this.answers = Collections.<Record>unmodifiableList(answers);
         this.additionals = Collections.<Record>unmodifiableList(additionals);
         this.questions = this.authorities = Collections.<Record>emptyList();
-        this.address = null;
+        this.nic = null;
     }
 
     /**
@@ -79,9 +78,9 @@ public class Packet {
      * @param in the incoming packet
      * @param address the address we read from
      */
-    Packet(ByteBuffer in, InetSocketAddress address) {
+    Packet(ByteBuffer in, NetworkInterface nic) {
         try {
-            this.address = address;
+            this.nic = nic;
             this.id = in.getShort() & 0xFFFF;
             this.flags = in.getShort() & 0xFFFF;
             int numQuestions = in.getShort() & 0xFFFF;
@@ -139,8 +138,8 @@ public class Packet {
     /**
      * The address we read from
      */
-    InetSocketAddress getAddress() {
-        return address;
+    NetworkInterface getNetworkInterface() {
+        return nic;
     }
 
     /**

@@ -254,8 +254,8 @@ public class Zeroconf {
      * by this object.
      * @return a List of local {@link InetAddress} objects
      */
-    public List<InetAddress> getLocalAddresses() {
-        return thread.getLocalAddresses();
+    public Collection<InetAddress> getLocalAddresses() {
+        return thread.getLocalAddresses().keySet();
     }
 
     /** 
@@ -331,6 +331,7 @@ public class Zeroconf {
     //--------------------------------------------------------------------
 
     void send(Packet packet) {
+        // System.out.println("# TX " + packet);
         thread.push(packet);
     }
 
@@ -537,7 +538,7 @@ public class Zeroconf {
                         channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                         channel.bind(new InetSocketAddress(PORT));
                         channel.join(BROADCAST4.getAddress(), nic);
-                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ)));
+                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
                     } catch (Exception e) {
                         // Don't report, this method is called regularly and what is the user going to do about it?
                         // e.printStackTrace();
@@ -559,7 +560,7 @@ public class Zeroconf {
                         channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                         channel.bind(new InetSocketAddress(PORT));
                         channel.join(BROADCAST6.getAddress(), nic);
-                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ)));
+                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
                     } catch (Exception e) {
                         // Don't report, this method is called regularly and what is the user going to do about it?
                         // e.printStackTrace();
@@ -604,16 +605,16 @@ public class Zeroconf {
             return changed;
         }
 
-        synchronized List<InetAddress> getLocalAddresses() {
-            List<InetAddress> list = new ArrayList<InetAddress>();
-            for (List<InetAddress> pernic : localAddresses.values()) {
-                for (InetAddress address : pernic) {
-                    if (!list.contains(address)) {
-                        list.add(address);
+        synchronized Map<InetAddress,NetworkInterface> getLocalAddresses() {
+            Map<InetAddress,NetworkInterface> map = new HashMap<InetAddress,NetworkInterface>();
+            for (Map.Entry<NetworkInterface,List<InetAddress>> e : localAddresses.entrySet()) {
+                for (InetAddress address : e.getValue()) {
+                    if (!map.containsKey(address)) {
+                        map.put(address, e.getKey());
                     }
                 }
             }
-            return list;
+            return map;
         }
 
         public void run() {
@@ -632,7 +633,7 @@ public class Zeroconf {
                 try {
                     Packet packet = pop();
                     if (packet != null) {
-                        // Packet to Send
+                        // Packet to send.
                         buf.clear();
                         packet.write(buf);
                         buf.flip();
@@ -643,17 +644,17 @@ public class Zeroconf {
                                 log("Listener exception", e);
                             }
                         }
+                        NetworkInterface nic = packet.getNetworkInterface();
                         for (NicSelectionKey nsk : channels) {
-                            DatagramChannel channel = (DatagramChannel)nsk.key.channel();
-                            InetSocketAddress address = packet.getAddress();
-                            if (address != null) {
-                                channel.send(buf, address);
-                            } else {
-                                if (useipv4) {
-                                    channel.send(buf, BROADCAST4);
-                                }
-                                if (useipv6) {
-                                    channel.send(buf, BROADCAST6);
+                            if (nsk.nic.isUp()) {
+                                DatagramChannel channel = (DatagramChannel)nsk.key.channel();
+                                if (nic == null || nic.equals(nsk.nic)) {
+                                    if (useipv4) {
+                                        channel.send(buf, BROADCAST4);
+                                    }
+                                    if (useipv6) {
+                                        channel.send(buf, BROADCAST6);
+                                    }
                                 }
                             }
                         }
@@ -661,18 +662,20 @@ public class Zeroconf {
 
                     // We know selector exists
                     selector.select(5000);
-                    Set<SelectionKey> selected = selector.selectedKeys();
-                    for (SelectionKey key : selected) {
+                    for (Iterator<SelectionKey> i=selector.selectedKeys().iterator();i.hasNext();) {
+                        SelectionKey key = i.next();
+                        i.remove();
                         // We know selected keys are readable
                         DatagramChannel channel = (DatagramChannel)key.channel();
                         InetSocketAddress address = (InetSocketAddress)channel.receive(buf);
-                        if (address != null && buf.position() != 0) {
+                        if (buf.position() != 0) {
                             buf.flip();
-                            packet = new Packet(buf, address);
+                            NetworkInterface nic = (NetworkInterface)key.attachment();
+                            packet = new Packet(buf, nic);
+                            // System.out.println("# RX: on " + nic.getName() + ": " + packet);
                             processPacket(packet);
                         }
                     }
-                    selected.clear();
 
                     processExpiry();
                     List<NetworkInterface> changed = null;
@@ -726,13 +729,21 @@ public class Zeroconf {
         }
         processQuestions(packet);
         Collection<Service> mod = null, add = null;
-        for (int pass=0;pass<4;pass++) {
-            for (Record r : pass == 3 ? packet.getAdditionals() : packet.getAnswers()) {
+        // answers-ptr, additionals-ptr, answers-srv, additionals-srv, additionals-other
+        for (int pass=0;pass<5;pass++) {
+            for (Record r : pass == 0 || pass == 2 ? packet.getAnswers() : packet.getAdditionals()) {
                 boolean ok = false;
                 switch (pass) {
-                    case 0:  ok = r.getType() == Record.TYPE_PTR; break;
-                    case 1:  ok = r.getType() == Record.TYPE_SRV; break;
-                    default: ok = r.getType() != Record.TYPE_SRV && r.getType() != Record.TYPE_PTR;
+                    case 0:
+                    case 1:
+                        ok = r.getType() == Record.TYPE_PTR;
+                        break;
+                    case 2:
+                    case 3:
+                        ok = r.getType() == Record.TYPE_SRV;
+                        break;
+                    default:
+                        ok = r.getType() != Record.TYPE_SRV && r.getType() != Record.TYPE_PTR;
                 }
                 if (ok) {
                     for (Service service : processAnswer(r, packet, null)) {
@@ -783,6 +794,8 @@ public class Zeroconf {
     }
 
     private void processQuestions(Packet packet) {
+        final NetworkInterface nic = packet.getNetworkInterface();
+        Map<InetAddress,NetworkInterface> nicAddresses = thread.getLocalAddresses();
         List<Record> answers = null, additionals = null;
         for (Record question : packet.getQuestions()) {
             if (question.getName().equals(DISCOVERY) && (question.getType() == Record.TYPE_PTR || question.getType() == Record.TYPE_ANY)) {
@@ -795,32 +808,48 @@ public class Zeroconf {
             } else {
                 for (Packet p : announceServices.values()) { 
                     for (Record answer : p.getAnswers()) {
-                        if (question.getName().equals(answer.getName()) && (question.getType() == answer.getType() || question.getType() == Record.TYPE_ANY)) {
-                            if (answers == null) {
-                                answers = new ArrayList<Record>();
+                        if (!question.getName().equals(answer.getName())) {
+                            continue;
+                        }
+                        if (question.getType() != answer.getType() && question.getType() != Record.TYPE_ANY) {
+                            continue;
+                        }
+                        if (answer.getAddress() != null) {
+                            if (nicAddresses.get(answer.getAddress()) != null && !nic.equals(nicAddresses.get(answer.getAddress()))) {
+                                continue;
                             }
-                            if (additionals == null) {
-                                additionals = new ArrayList<Record>();
-                            }
-                            answers.add(answer);
-                            if (answer.getType() == Record.TYPE_PTR && question.getType() != Record.TYPE_ANY) {
-                                // When including a DNS-SD Service Instance Enumeration or Selective
-                                // Instance Enumeration (subtype) PTR record in a response packet, the
-                                // server/responder SHOULD include the following additional records:
-                                // * The SRV record(s) named in the PTR rdata.
-                                // * The TXT record(s) named in the PTR rdata.
-                                // * All address records (type "A" and "AAAA") named in the SRV rdata.
-                                for (Record a : p.getAnswers()) {
-                                    if (a.getType() == Record.TYPE_SRV || a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
+                        }
+                        if (answers == null) {
+                            answers = new ArrayList<Record>();
+                        }
+                        if (additionals == null) {
+                            additionals = new ArrayList<Record>();
+                        }
+                        answers.add(answer);
+                        List<Record> l = new ArrayList<Record>();
+                        l.addAll(p.getAnswers());
+                        l.addAll(p.getAdditionals());
+                        if (answer.getType() == Record.TYPE_PTR && question.getType() != Record.TYPE_ANY) {
+                            // When including a DNS-SD Service Instance Enumeration or Selective
+                            // Instance Enumeration (subtype) PTR record in a response packet, the
+                            // server/responder SHOULD include the following additional records:
+                            // * The SRV record(s) named in the PTR rdata.
+                            // * The TXT record(s) named in the PTR rdata.
+                            // * All address records (type "A" and "AAAA") named in the SRV rdata.
+                            for (Record a : l) {
+                                if (a.getType() == Record.TYPE_SRV || a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
+                                    if (a.getAddress() == null || nicAddresses.get(a.getAddress()) == null || nicAddresses.get(a.getAddress()).equals(nic)) {
                                         additionals.add(a);
                                     }
                                 }
-                            } else if (answer.getType() == Record.TYPE_SRV && question.getType() != Record.TYPE_ANY) {
-                                // When including an SRV record in a response packet, the
-                                // server/responder SHOULD include the following additional records:
-                                // * All address records (type "A" and "AAAA") named in the SRV rdata.
-                                for (Record a : p.getAnswers()) {
-                                    if (a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
+                            }
+                        } else if (answer.getType() == Record.TYPE_SRV && question.getType() != Record.TYPE_ANY) {
+                            // When including an SRV record in a response packet, the
+                            // server/responder SHOULD include the following additional records:
+                            // * All address records (type "A" and "AAAA") named in the SRV rdata.
+                            for (Record a : l) {
+                                if (a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
+                                    if (a.getAddress() == null || nicAddresses.get(a.getAddress()) == null || nicAddresses.get(a.getAddress()).equals(nic)) {
                                         additionals.add(a);
                                     }
                                 }

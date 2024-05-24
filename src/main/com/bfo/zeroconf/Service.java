@@ -207,7 +207,7 @@ public class Service {
      * Return an unmodifiable list containing the addresses
      * @return the list of addresses
      */
-    public List<InetAddress> getAddresses() {
+    public Collection<InetAddress> getAddresses() {
         if (addresses == null) {
             // Done this way on the theory that the local addresses may change,
             // and if it does we want this to update automatically.
