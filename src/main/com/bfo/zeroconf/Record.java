@@ -143,7 +143,7 @@ final class Record {
     }
 
     static Record newTxt(String name, Map<String,String> map) {
-        if (name == null || map == null || map.isEmpty()) {
+        if (name == null || map == null) {
             throw new IllegalArgumentException("name or map is invalid");
         }
         return new Record(TYPE_TXT, CLAZZ, 4500, name, map);
@@ -155,7 +155,7 @@ final class Record {
 
     static Record readAnswer(ByteBuffer in) {
 //        System.out.println("RECORD: " + Packet.dump(in));
-        int tell = ((Buffer)in).position();
+        int tell = in.position();
         try {
             String name = readName(in);
             int type = in.getShort() & 0xFFFF;
@@ -177,8 +177,8 @@ final class Record {
                 data = InetAddress.getByAddress(buf);
             } else if (type == TYPE_TXT) {
                 Map<String,String> map = new LinkedHashMap<String,String>();
-                int end = ((Buffer)in).position() + len;
-                while (((Buffer)in).position() < end) {
+                int end = in.position() + len;
+                while (in.position() < end) {
                     String value = readString(in);
                     if (value.length() > 0) {
                         int ix = value.indexOf("=");
@@ -206,7 +206,7 @@ final class Record {
 
     static Record readQuestion(ByteBuffer in) {
 //        System.out.println("RECORD: " + Packet.dump(in));
-        int tell = ((Buffer)in).position();
+        int tell = in.position();
         try {
             String name = readName(in);
             int type = in.getShort() & 0xFFFF;
@@ -239,11 +239,15 @@ final class Record {
             } else if (type == TYPE_AAAA) {
                 out.put(((Inet6Address)getAddress()).getAddress());
             } else if (type == TYPE_TXT) {
-                for (Map.Entry<String,String> e : getText().entrySet()) {
-                    String value = e.getKey()+"="+e.getValue();
-                    byte[] b = value.getBytes(StandardCharsets.UTF_8);
-                    out.put((byte)b.length);
-                    out.put(b);
+                if (getText().isEmpty()) {
+                    out.put((byte)0);
+                } else {
+                    for (Map.Entry<String,String> e : getText().entrySet()) {
+                        String value = e.getKey()+"="+e.getValue();
+                        byte[] b = value.getBytes(StandardCharsets.UTF_8);
+                        out.put((byte)b.length);
+                        out.put(b);
+                    }
                 }
             } else if (data instanceof byte[]) {
                 out.put((byte[])data);
@@ -252,7 +256,7 @@ final class Record {
                 int len = out.position() - pos - 2;
                 out.putShort(pos, (short)len);
             } else {
-                out.position(pos);
+                ((Buffer)out).position(pos);
             }
 
             /*
@@ -314,8 +318,8 @@ final class Record {
         if (len == 0) {
             return "";
         } else {
-            String s = new String(in.array(), ((Buffer)in).position(), len, StandardCharsets.UTF_8);
-            ((Buffer)in).position(((Buffer)in).position() + len);
+            String s = new String(in.array(), in.position(), len, StandardCharsets.UTF_8);
+            ((Buffer)in).position(in.position() + len);
             return s;
         }
     }
@@ -330,12 +334,12 @@ final class Record {
                 if (sb.length() > 0) {
                     sb.append('.');
                 }
-                sb.append(new String(in.array(), ((Buffer)in).position(), len, StandardCharsets.UTF_8));
-                ((Buffer)in).position(((Buffer)in).position() + len);
+                sb.append(new String(in.array(), in.position(), len, StandardCharsets.UTF_8));
+                ((Buffer)in).position(in.position() + len);
             } else {
                 int off = ((len & 0x3F) << 8) | (in.get() & 0xFF);       // Offset from start of packet
                 if (end < 0) {
-                    end = ((Buffer)in).position();
+                    end = in.position();
                 }
                 ((Buffer)in).position(off);
             }

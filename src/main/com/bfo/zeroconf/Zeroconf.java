@@ -147,7 +147,7 @@ public class Zeroconf {
                 nics.add(e.nextElement());
             }
         } catch (Exception e) {
-            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.WARNING, "Can't add NetworkInterfaces", e);
+            log("Can't add NetworkInterfaces", e);
         }
     }
 
@@ -1097,7 +1097,11 @@ public class Zeroconf {
     }
 
     private static void log(String message, Exception e) {
-        System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.ERROR, message, e);
+        try {
+            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.ERROR, message, e);
+        } catch (Throwable ex) {
+            java.util.logging.Logger.getLogger(Zeroconf.class.getName()).log(java.util.logging.Level.SEVERE, message, e);
+        }
     }
 
 }
