@@ -629,14 +629,14 @@ public class Zeroconf {
                 Thread.sleep(100);
             } catch (InterruptedException e) {}
             while (!cancelled) {
-                buf.clear();
+                ((Buffer)buf).clear();
                 try {
                     Packet packet = pop();
                     if (packet != null) {
                         // Packet to send.
-                        buf.clear();
+                        ((Buffer)buf).clear();
                         packet.write(buf);
-                        buf.flip();
+                        ((Buffer)buf).flip();
                         for (ZeroconfListener listener : listeners) {
                             try {
                                 listener.packetSent(packet);
@@ -669,7 +669,7 @@ public class Zeroconf {
                         DatagramChannel channel = (DatagramChannel)key.channel();
                         InetSocketAddress address = (InetSocketAddress)channel.receive(buf);
                         if (buf.position() != 0) {
-                            buf.flip();
+                            ((Buffer)buf).flip();
                             NetworkInterface nic = (NetworkInterface)key.attachment();
                             packet = new Packet(buf, nic);
                             // System.out.println("# RX: on " + nic.getName() + ": " + packet);

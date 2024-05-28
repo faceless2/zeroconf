@@ -155,7 +155,7 @@ final class Record {
 
     static Record readAnswer(ByteBuffer in) {
 //        System.out.println("RECORD: " + Packet.dump(in));
-        int tell = in.position();
+        int tell = ((Buffer)in).position();
         try {
             String name = readName(in);
             int type = in.getShort() & 0xFFFF;
@@ -177,8 +177,8 @@ final class Record {
                 data = InetAddress.getByAddress(buf);
             } else if (type == TYPE_TXT) {
                 Map<String,String> map = new LinkedHashMap<String,String>();
-                int end = in.position() + len;
-                while (in.position() < end) {
+                int end = ((Buffer)in).position() + len;
+                while (((Buffer)in).position() < end) {
                     String value = readString(in);
                     if (value.length() > 0) {
                         int ix = value.indexOf("=");
@@ -199,21 +199,21 @@ final class Record {
             Record r =  new Record(type, clazz, ttl, name, data);
             return r;
         } catch (Exception e) {
-            in.position(tell);
+            ((Buffer)in).position(tell);
             throw (RuntimeException)new RuntimeException("Failed reading record " + Packet.dump(in)).initCause(e);
         }
     }
 
     static Record readQuestion(ByteBuffer in) {
 //        System.out.println("RECORD: " + Packet.dump(in));
-        int tell = in.position();
+        int tell = ((Buffer)in).position();
         try {
             String name = readName(in);
             int type = in.getShort() & 0xFFFF;
             int clazz = in.getShort() & 0xFFFF;
             return new Record(type, clazz, 0, name, null);
         } catch (Exception e) {
-            in.position(tell);
+            ((Buffer)in).position(tell);
             throw (RuntimeException)new RuntimeException("Failed reading record " + Packet.dump(in)).initCause(e);
         }
     }
@@ -314,8 +314,8 @@ final class Record {
         if (len == 0) {
             return "";
         } else {
-            String s = new String(in.array(), in.position(), len, StandardCharsets.UTF_8);
-            in.position(in.position() + len);
+            String s = new String(in.array(), ((Buffer)in).position(), len, StandardCharsets.UTF_8);
+            ((Buffer)in).position(((Buffer)in).position() + len);
             return s;
         }
     }
@@ -330,18 +330,18 @@ final class Record {
                 if (sb.length() > 0) {
                     sb.append('.');
                 }
-                sb.append(new String(in.array(), in.position(), len, StandardCharsets.UTF_8));
-                in.position(in.position() + len);
+                sb.append(new String(in.array(), ((Buffer)in).position(), len, StandardCharsets.UTF_8));
+                ((Buffer)in).position(((Buffer)in).position() + len);
             } else {
                 int off = ((len & 0x3F) << 8) | (in.get() & 0xFF);       // Offset from start of packet
                 if (end < 0) {
-                    end = in.position();
+                    end = ((Buffer)in).position();
                 }
-                in.position(off);
+                ((Buffer)in).position(off);
             }
         }
         if (end >= 0) {
-            in.position(end);
+            ((Buffer)in).position(end);
         }
 //        System.out.println("STRINGLIST OUT: " + Service.quote(sb.toString()));
         return sb.toString();
