@@ -18,6 +18,16 @@ public class Packet {
     private static final int FLAG_AA       = 10;
 
 
+    private Packet(int id, int flags, NetworkInterface nic, List<Record> questions, List<Record> answers, List<Record> authorities, List<Record> additionals)  {
+        this.id = id;
+        this.flags = flags;
+        this.nic = nic;
+        this.questions = Collections.<Record>unmodifiableList(questions);
+        this.answers = Collections.<Record>unmodifiableList(answers);
+        this.authorities = Collections.<Record>unmodifiableList(authorities);
+        this.additionals = Collections.<Record>unmodifiableList(additionals);
+    }
+
     /**
      * Create a question packet
      * @param question the question record
@@ -154,6 +164,42 @@ public class Packet {
      */
     boolean isResponse() {
         return (flags & (1<<FLAG_RESPONSE)) != 0;
+    }
+
+    /**
+     * Return a clone of this Packet but excluding any A or AAAA records in the list of addresses.
+     * @param excludedAddresses the addresses to exclude
+     * @return a new Packet, or null if all records were excluded
+     */
+    Packet excludingAddresses(Collection<InetAddress> excludedAddresses) {
+        List<Record> questions = this.questions.isEmpty() ? this.questions : new ArrayList<Record>(this.questions);
+        List<Record> answers = this.answers.isEmpty() ? this.answers : new ArrayList<Record>(this.answers);
+        List<Record> additionals = this.additionals.isEmpty() ? this.additionals : new ArrayList<Record>(this.additionals);
+        List<Record> authorities = this.authorities.isEmpty() ? this.authorities : new ArrayList<Record>(this.authorities);
+        for (int i=0;i<questions.size();i++) {
+            if (questions.get(i).getAddress() != null && excludedAddresses.contains(questions.get(i).getAddress())) {
+                questions.remove(i--);
+            }
+        }
+        for (int i=0;i<answers.size();i++) {
+            if (answers.get(i).getAddress() != null && excludedAddresses.contains(answers.get(i).getAddress())) {
+                answers.remove(i--);
+            }
+        }
+        for (int i=0;i<additionals.size();i++) {
+            if (additionals.get(i).getAddress() != null && excludedAddresses.contains(additionals.get(i).getAddress())) {
+                additionals.remove(i--);
+            }
+        }
+        for (int i=0;i<authorities.size();i++) {
+            if (authorities.get(i).getAddress() != null && excludedAddresses.contains(authorities.get(i).getAddress())) {
+                authorities.remove(i--);
+            }
+        }
+        if (questions.isEmpty() && answers.isEmpty() && authorities.isEmpty() && additionals.isEmpty()) {
+            return null;
+        }
+        return new Packet(id, flags, nic, questions, answers, authorities, additionals);
     }
 
     /**
