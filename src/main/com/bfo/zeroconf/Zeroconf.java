@@ -68,7 +68,6 @@ public class Zeroconf {
     }
 
     private ListenerThread thread;
-    private boolean useipv4, useipv6;
     private String hostname, domain;
     private InetAddress address;
     private final CopyOnWriteArrayList<ZeroconfListener> listeners;
@@ -88,8 +87,6 @@ public class Zeroconf {
         } catch (IOException e) {
             // Not worthy of an IOException
         }
-        useipv4 = true;
-        useipv6 = false;
         listeners = new CopyOnWriteArrayList<ZeroconfListener>();
         announceServices = new ConcurrentHashMap<Service,Packet>();
         heardServices = new ConcurrentHashMap<String,Service>();
@@ -147,7 +144,7 @@ public class Zeroconf {
                 nics.add(e.nextElement());
             }
         } catch (Exception e) {
-            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.WARNING, "Can't add NetworkInterfaces", e);
+            log("Can't add NetworkInterfaces", e);
         }
     }
 
@@ -538,7 +535,7 @@ public class Zeroconf {
                         channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                         channel.bind(new InetSocketAddress(PORT));
                         channel.join(BROADCAST4.getAddress(), nic);
-                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
+                        channels.add(new NicSelectionKey(nic, BROADCAST4, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
                     } catch (Exception e) {
                         // Don't report, this method is called regularly and what is the user going to do about it?
                         // e.printStackTrace();
@@ -560,7 +557,7 @@ public class Zeroconf {
                         channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                         channel.bind(new InetSocketAddress(PORT));
                         channel.join(BROADCAST6.getAddress(), nic);
-                        channels.add(new NicSelectionKey(nic, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
+                        channels.add(new NicSelectionKey(nic, BROADCAST6, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
                     } catch (Exception e) {
                         // Don't report, this method is called regularly and what is the user going to do about it?
                         // e.printStackTrace();
@@ -634,26 +631,36 @@ public class Zeroconf {
                     Packet packet = pop();
                     if (packet != null) {
                         // Packet to send.
-                        ((Buffer)buf).clear();
-                        packet.write(buf);
-                        ((Buffer)buf).flip();
-                        for (ZeroconfListener listener : listeners) {
-                            try {
-                                listener.packetSent(packet);
-                            } catch (Exception e) {
-                                log("Listener exception", e);
-                            }
-                        }
+                        // * If it is a response to one we received, reply only on the NIC it was received on
+                        // * If it contains addresses that are local addresses (assigned to a NIC on this machine)
+                        //   then send only those addresses that apply to the NIC we are sending on.
                         NetworkInterface nic = packet.getNetworkInterface();
                         for (NicSelectionKey nsk : channels) {
                             if (nsk.nic.isUp()) {
                                 DatagramChannel channel = (DatagramChannel)nsk.key.channel();
                                 if (nic == null || nic.equals(nsk.nic)) {
-                                    if (useipv4) {
-                                        channel.send(buf, BROADCAST4);
+                                    Collection<InetAddress> excludeAddresses = new ArrayList<InetAddress>();
+                                    synchronized(this) {
+                                        for (Map.Entry<NetworkInterface,List<InetAddress>> e : localAddresses.entrySet()) {
+                                            if (e.getKey() != nsk.nic) {
+                                                excludeAddresses.addAll(e.getValue());
+                                            }
+                                        }
                                     }
-                                    if (useipv6) {
-                                        channel.send(buf, BROADCAST6);
+                                    Packet dup = packet.excludingAddresses(excludeAddresses);
+                                    if (dup != null) {
+                                        ((Buffer)buf).clear();
+                                        dup.write(buf);
+                                        ((Buffer)buf).flip();
+                                        channel.send(buf, nsk.broadcast);
+                                        // System.out.println("# Sending " + dup + " to " + nsk.broadcast + " on " + nsk.nic.getName());
+                                        for (ZeroconfListener listener : listeners) {
+                                            try {
+                                                listener.packetSent(dup);
+                                            } catch (Exception e) {
+                                                log("Listener exception", e);
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -712,9 +719,11 @@ public class Zeroconf {
 
     private static class NicSelectionKey {
         final NetworkInterface nic;
+        final InetSocketAddress broadcast;
         final SelectionKey key;
-        NicSelectionKey(NetworkInterface nic, SelectionKey key) {
+        NicSelectionKey(NetworkInterface nic, InetSocketAddress broadcast, SelectionKey key) {
             this.nic = nic;
+            this.broadcast = broadcast;
             this.key = key;
         }
     }
@@ -795,7 +804,6 @@ public class Zeroconf {
 
     private void processQuestions(Packet packet) {
         final NetworkInterface nic = packet.getNetworkInterface();
-        Map<InetAddress,NetworkInterface> nicAddresses = thread.getLocalAddresses();
         List<Record> answers = null, additionals = null;
         for (Record question : packet.getQuestions()) {
             if (question.getName().equals(DISCOVERY) && (question.getType() == Record.TYPE_PTR || question.getType() == Record.TYPE_ANY)) {
@@ -813,11 +821,6 @@ public class Zeroconf {
                         }
                         if (question.getType() != answer.getType() && question.getType() != Record.TYPE_ANY) {
                             continue;
-                        }
-                        if (answer.getAddress() != null) {
-                            if (nicAddresses.get(answer.getAddress()) != null && !nic.equals(nicAddresses.get(answer.getAddress()))) {
-                                continue;
-                            }
                         }
                         if (answers == null) {
                             answers = new ArrayList<Record>();
@@ -838,9 +841,7 @@ public class Zeroconf {
                             // * All address records (type "A" and "AAAA") named in the SRV rdata.
                             for (Record a : l) {
                                 if (a.getType() == Record.TYPE_SRV || a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
-                                    if (a.getAddress() == null || nicAddresses.get(a.getAddress()) == null || nicAddresses.get(a.getAddress()).equals(nic)) {
-                                        additionals.add(a);
-                                    }
+                                    additionals.add(a);
                                 }
                             }
                         } else if (answer.getType() == Record.TYPE_SRV && question.getType() != Record.TYPE_ANY) {
@@ -849,9 +850,7 @@ public class Zeroconf {
                             // * All address records (type "A" and "AAAA") named in the SRV rdata.
                             for (Record a : l) {
                                 if (a.getType() == Record.TYPE_A || a.getType() == Record.TYPE_AAAA || a.getType() == Record.TYPE_TXT) {
-                                    if (a.getAddress() == null || nicAddresses.get(a.getAddress()) == null || nicAddresses.get(a.getAddress()).equals(nic)) {
-                                        additionals.add(a);
-                                    }
+                                    additionals.add(a);
                                 }
                             }
                         }
@@ -1097,7 +1096,11 @@ public class Zeroconf {
     }
 
     private static void log(String message, Exception e) {
-        System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.ERROR, message, e);
+        try {
+            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.ERROR, message, e);
+        } catch (Throwable ex) {
+            java.util.logging.Logger.getLogger(Zeroconf.class.getName()).log(java.util.logging.Level.SEVERE, message, e);
+        }
     }
 
 }
