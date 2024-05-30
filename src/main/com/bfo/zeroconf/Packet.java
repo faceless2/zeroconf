@@ -29,13 +29,22 @@ public class Packet {
     }
 
     /**
-     * Create a question packet
+     * Create a question packet.
+     * If the supplied question is for A or AAAA, we automatically add the other one
      * @param question the question record
      */
     Packet(Record question) {
         this.id = 0;
         this.flags = 0;
-        this.questions = Collections.<Record>singletonList(question);
+        if (question.getType() == Record.TYPE_A) {
+            Record aaaa = Record.newQuestion(Record.TYPE_AAAA, question.getName());
+            this.questions = Collections.<Record>unmodifiableList(Arrays.asList(question, aaaa));
+        } else if (question.getType() == Record.TYPE_AAAA) {
+            Record a = Record.newQuestion(Record.TYPE_A, question.getName());
+            this.questions = Collections.<Record>unmodifiableList(Arrays.asList(a, question));
+        } else {
+            this.questions = Collections.<Record>singletonList(question);
+        }
         this.answers = this.additionals = this.authorities = Collections.<Record>emptyList();
         this.nic = null;
     }
@@ -167,39 +176,91 @@ public class Packet {
     }
 
     /**
+     * Return true if the specified address matches one of the local addresses
+     * of the Network Interface.
+     */
+    private static boolean appliesTo(InetAddress address, NetworkInterface nic) {
+        for (InterfaceAddress ia : nic.getInterfaceAddresses()) {
+            byte[] a0 = ia.getAddress().getAddress();
+            byte[] a1 = address.getAddress();
+            if (a0.length == a1.length) {
+                byte[] mask = new byte[a0.length];
+                for (int i=0;i<ia.getNetworkPrefixLength();i++) {
+                    mask[i>>3] |= (byte)(1<<(7-(i&7)));
+                }
+                for (int i=0;i<mask.length;i++) {
+                    if ((a0[i]&mask[i]) != (a1[i]&mask[i])) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * Does a record apply to a specific NIC?
+     * We are not choosing the best NIC, only if it's a possibility. A record applies if:
+     *  -- it has no address (eg it's a SRV)
+     *  -- it has an address that matches the local addresses on this NIC
+     *  -- it doesn't match ANY local addresses - in that case, send it to all NICs
+     * @param record the record network interface
+     * @param nic the current network interface
+     * @param nics all the network interfaces being considered
+     */
+    private static boolean appliesTo(Record r, NetworkInterface nic, Collection<NetworkInterface> nics) {
+        InetAddress address = r.getAddress();
+        if (address == null) {
+            return true;
+        }
+        if (appliesTo(address, nic)) {
+            return true;
+        }
+        for (NetworkInterface onic : nics) {
+            if (onic != nic && appliesTo(address, onic)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Return a clone of this Packet but excluding any A or AAAA records in the list of addresses.
      * @param excludedAddresses the addresses to exclude
      * @return a new Packet, or null if all records were excluded
      */
-    Packet excludingAddresses(Collection<InetAddress> excludedAddresses) {
+    Packet appliedTo(NetworkInterface nic, Collection<NetworkInterface> nics) {
         List<Record> questions = this.questions.isEmpty() ? this.questions : new ArrayList<Record>(this.questions);
         List<Record> answers = this.answers.isEmpty() ? this.answers : new ArrayList<Record>(this.answers);
         List<Record> additionals = this.additionals.isEmpty() ? this.additionals : new ArrayList<Record>(this.additionals);
         List<Record> authorities = this.authorities.isEmpty() ? this.authorities : new ArrayList<Record>(this.authorities);
         for (int i=0;i<questions.size();i++) {
-            if (questions.get(i).getAddress() != null && excludedAddresses.contains(questions.get(i).getAddress())) {
+            if (!appliesTo(questions.get(i), nic, nics)) {
                 questions.remove(i--);
             }
         }
         for (int i=0;i<answers.size();i++) {
-            if (answers.get(i).getAddress() != null && excludedAddresses.contains(answers.get(i).getAddress())) {
+            if (!appliesTo(answers.get(i), nic, nics)) {
                 answers.remove(i--);
             }
         }
         for (int i=0;i<additionals.size();i++) {
-            if (additionals.get(i).getAddress() != null && excludedAddresses.contains(additionals.get(i).getAddress())) {
+            if (!appliesTo(additionals.get(i), nic, nics)) {
                 additionals.remove(i--);
             }
         }
         for (int i=0;i<authorities.size();i++) {
-            if (authorities.get(i).getAddress() != null && excludedAddresses.contains(authorities.get(i).getAddress())) {
+            if (!appliesTo(authorities.get(i), nic, nics)) {
                 authorities.remove(i--);
             }
         }
         if (questions.isEmpty() && answers.isEmpty() && authorities.isEmpty() && additionals.isEmpty()) {
             return null;
         }
-        return new Packet(id, flags, nic, questions, answers, authorities, additionals);
+        Packet p = new Packet(id, flags, nic, questions, answers, authorities, additionals);
+        return p;
     }
 
     /**
@@ -304,6 +365,9 @@ public class Packet {
     List<Record> getAdditionals() {
         return additionals;
     }
+
+    //-------------------------------------------------
+
 
     /*
     public static void main(String[] args) throws Exception {

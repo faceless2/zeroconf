@@ -18,6 +18,7 @@ public class Service {
     private int port;
     private List<InetAddress> addresses;
     private Map<String,String> text;
+    private long lastAddressRequest;
 
     Service(Zeroconf zeroconf, String fqdn, String name, String type, String domain) {
         this.zeroconf = zeroconf;
@@ -220,6 +221,14 @@ public class Service {
             // and if it does we want this to update automatically.
             return zeroconf.getLocalAddresses();
         } else {
+            if (addresses.isEmpty()) {
+                if (System.currentTimeMillis() - lastAddressRequest > 1000) {
+                    // We should have these, but maybe they weren't announced?
+                    // Ask once a second, no more. Requesting A also requests AAAA
+                    lastAddressRequest = System.currentTimeMillis();
+                    zeroconf.query(type, name, Record.TYPE_A);
+                }
+            }
             return Collections.<InetAddress>unmodifiableList(addresses);
         }
     }
