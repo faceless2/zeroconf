@@ -38,7 +38,7 @@ import com.bfo.zeroconf.*;
 Zeroconf zc = new Zeroconf();
 zc.addListener(new ZeroconfListener() {
     public void serviceNamed(String type, String name) {
-        if ("_http._tcp.local".equals(type)) {
+        if ("_http._tcp".equals(type)) {
             zc.query(type, name);  // Ask for details on any announced HTTP services
         }
     }
@@ -47,7 +47,7 @@ zc.addListener(new ZeroconfListener() {
     }
 });
 
-zc.query("_http._tcp.local", null); // Ask for any HTTP services
+zc.query("_http._tcp", null); // Ask for any HTTP services
 
 // time passes
 for (Service s : zc.getServices()) {
