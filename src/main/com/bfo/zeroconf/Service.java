@@ -10,12 +10,15 @@ import java.util.*;
  */
 public class Service {
 
+    private static final List<InetAddress> LOCAL = Collections.<InetAddress>unmodifiableList(new ArrayList<InetAddress>(0));
+
     private final Zeroconf zeroconf;
     private final String fqdn, name, type, domain;      // Store FQDN because it may not be escaped properly. Store it exactly as we hear it
     private String host;
     private int port;
     private List<InetAddress> addresses;
     private Map<String,String> text;
+    private long lastAddressRequest;
 
     Service(Zeroconf zeroconf, String fqdn, String name, String type, String domain) {
         this.zeroconf = zeroconf;
@@ -23,6 +26,7 @@ public class Service {
         this.name = name;
         this.type = type;
         this.domain = domain;
+        this.addresses = new ArrayList<InetAddress>();
     }
 
     Service(Zeroconf zeroconf, String fqdn) {
@@ -35,6 +39,7 @@ public class Service {
         this.name = l.get(0);
         this.type = l.get(1);
         this.domain = l.get(2);
+        this.addresses = new ArrayList<InetAddress>();
     }
 
     /**
@@ -112,8 +117,8 @@ public class Service {
     }
 
     boolean addAddress(InetAddress address) {
-        if (addresses == null) {
-            addresses = new ArrayList<InetAddress>();
+        if (addresses == LOCAL) {
+            throw new IllegalStateException("Local addresses");
         }
         if (!addresses.contains(address)) {
             addresses.add(address);
@@ -123,7 +128,10 @@ public class Service {
     }
 
     boolean removeAddress(InetAddress address) {
-        return addresses != null && addresses.remove(address);
+        if (addresses == LOCAL) {
+            throw new IllegalStateException("Local addresses");
+        }
+        return addresses.remove(address);
     }
 
     /**
@@ -208,11 +216,19 @@ public class Service {
      * @return the list of addresses
      */
     public Collection<InetAddress> getAddresses() {
-        if (addresses == null) {
+        if (addresses == LOCAL) {
             // Done this way on the theory that the local addresses may change,
             // and if it does we want this to update automatically.
             return zeroconf.getLocalAddresses();
         } else {
+            if (addresses.isEmpty()) {
+                if (System.currentTimeMillis() - lastAddressRequest > 1000) {
+                    // We should have these, but maybe they weren't announced?
+                    // Ask once a second, no more. Requesting A also requests AAAA
+                    lastAddressRequest = System.currentTimeMillis();
+                    zeroconf.query(type, name, Record.TYPE_A);
+                }
+            }
             return Collections.<InetAddress>unmodifiableList(addresses);
         }
     }
@@ -279,7 +295,7 @@ public class Service {
             }
             sb.append('}');
         }
-        if (addresses != null) {
+        if (addresses != LOCAL) {
             sb.append(",\"addresses\":[");
             for (int i=0;i<addresses.size();i++) {
                 if (i > 0) {
@@ -503,6 +519,8 @@ public class Service {
                 for (InetAddress address : addresses) {
                     service.addAddress(address);
                 }
+            } else {
+                service.addresses = LOCAL;
             }
             if (!props.isEmpty()) {
                 service.setText(Collections.<String,String>unmodifiableMap(props));

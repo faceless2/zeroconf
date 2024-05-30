@@ -300,6 +300,10 @@ public class Zeroconf {
      * @param name the service instance name, or null to discover services of the specified type
      */
     public void query(String type, String name) {
+        query(type, name, Record.TYPE_SRV);
+    }
+
+    void query(String type, String name, int recordType) {
         if (type == null) {
             send(new Packet(Record.newQuestion(Record.TYPE_PTR, DISCOVERY)));
         } else {
@@ -320,7 +324,7 @@ public class Zeroconf {
                 }
                 sb.append('.');
                 sb.append(type);
-                send(new Packet(Record.newQuestion(Record.TYPE_SRV, sb.toString())));
+                send(new Packet(Record.newQuestion(recordType, sb.toString())));
             }
         }
     }
@@ -635,19 +639,15 @@ public class Zeroconf {
                         // * If it contains addresses that are local addresses (assigned to a NIC on this machine)
                         //   then send only those addresses that apply to the NIC we are sending on.
                         NetworkInterface nic = packet.getNetworkInterface();
+                        Collection<NetworkInterface> nics;
+                        synchronized(this) {
+                            nics = new HashSet<NetworkInterface>(localAddresses.keySet());
+                        }
                         for (NicSelectionKey nsk : channels) {
                             if (nsk.nic.isUp()) {
                                 DatagramChannel channel = (DatagramChannel)nsk.key.channel();
                                 if (nic == null || nic.equals(nsk.nic)) {
-                                    Collection<InetAddress> excludeAddresses = new ArrayList<InetAddress>();
-                                    synchronized(this) {
-                                        for (Map.Entry<NetworkInterface,List<InetAddress>> e : localAddresses.entrySet()) {
-                                            if (e.getKey() != nsk.nic) {
-                                                excludeAddresses.addAll(e.getValue());
-                                            }
-                                        }
-                                    }
-                                    Packet dup = packet.excludingAddresses(excludeAddresses);
+                                    Packet dup = packet.appliedTo(nsk.nic, nics);
                                     if (dup != null) {
                                         ((Buffer)buf).clear();
                                         dup.write(buf);
@@ -975,19 +975,24 @@ public class Zeroconf {
                 }
             }
             if (service != null) {
-                if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
-                    modified = true;
-                }
                 final Service fservice = service;
-                int ttl = r.getTTL();
                 if (getAnnouncedServices().contains(service)) {
+                    int ttl = r.getTTL();
                     ttl = Math.min(ttl * 9/10, ttl - 5);        // Refresh at 90% of expiry or at least 5s before
-                }
-                expire(service, r.getTTL(), new Runnable() {
-                    public void run() {
-                        if (getAnnouncedServices().contains(fservice)) {
-                            reannounce(fservice);
-                        } else {
+                    expire(service, r.getTTL(), new Runnable() {
+                        public void run() {
+                            if (getAnnouncedServices().contains(fservice)) {
+                                reannounce(fservice);
+                            }
+                        }
+                    });
+                } else {
+                    if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
+                        modified = true;
+                    }
+                    int ttl = r.getTTL();
+                    expire(service, r.getTTL(), new Runnable() {
+                        public void run() {
                             heardServices.remove(fqdn);
                             for (ZeroconfListener listener : listeners) {
                                 try {
@@ -997,10 +1002,10 @@ public class Zeroconf {
                                 }
                             }
                         }
+                    });
+                    if (!modified) {
+                        service = null;
                     }
-                });
-                if (!modified) {
-                    service = null;
                 }
             }
         } else if (r.getType() == Record.TYPE_TXT) {
@@ -1012,7 +1017,7 @@ public class Zeroconf {
                         service = null;
                     }
                 }
-            } else if (fqdn.equals(service.getFQDN())) {
+            } else if (fqdn.equals(service.getFQDN()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
                 if (!service.setText(r.getText())) {
                     service = null;
@@ -1042,7 +1047,7 @@ public class Zeroconf {
                         }
                     }
                 }
-            } else if (host.equals(service.getHost())) {
+            } else if (host.equals(service.getHost()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
                 InetAddress address = r.getAddress();
                 if (!service.addAddress(address)) {
