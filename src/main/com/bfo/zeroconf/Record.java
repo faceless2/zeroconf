@@ -44,13 +44,12 @@ final class Record {
         this.data = data;
         if (data == null) {
         } else if ((type == TYPE_A || type == TYPE_AAAA) && !(data instanceof InetAddress)) {
-            throw new Error(data.toString()+" "+data.getClass().getName());
+            throw new IllegalArgumentException("Data is a "+data.getClass().getName() + " not InetAddress");
         } else if (type == TYPE_PTR && !(data instanceof String)) {
-            throw new Error(data.toString()+" "+data.getClass().getName());
+            throw new IllegalArgumentException("Data is a "+data.getClass().getName() + " not String");
         } else if (type == TYPE_SRV && !(data instanceof SrvData)) {
-            throw new Error(data.toString()+" "+data.getClass().getName());
+            throw new IllegalArgumentException("Data is a "+data.getClass().getName() + " not SrvData");
         }
-        if (type == TYPE_PTR && data instanceof String && ((String)data).startsWith("...")) throw new Error(data.toString());
     }
 
     int getTTL() {
@@ -297,7 +296,9 @@ final class Record {
         byte[] out = new byte[buf.position()];
         System.arraycopy(buf.array(), 0, out, 0, out.length);
         String s = readName(ByteBuffer.wrap(out, 0, out.length));
-        if (!s.equals(name)) throw new Error(Service.quote(name)+" "+Service.quote(s));
+        if (!s.equals(name)) {
+            throw new IllegalStateException("Wrong name: " + Service.quote(name) + " != " + Service.quote(s));
+        }
         return out;
     }
 
@@ -431,7 +432,9 @@ final class Record {
             this.weight = weight;
             this.port = port;
             this.host = host;
-            if (host == null) throw new Error();
+            if (host == null) {
+                throw new IllegalArgumentException("Host is null");
+            }
         }
     }
 

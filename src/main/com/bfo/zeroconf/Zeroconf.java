@@ -307,6 +307,9 @@ public class Zeroconf {
         if (type == null) {
             send(new Packet(Record.newQuestion(Record.TYPE_PTR, DISCOVERY)));
         } else {
+            if (type != null && type.endsWith(".")) {
+                throw new IllegalArgumentException("Type " + Service.quote(type) + " should not end with a dot");
+            }
             int ix = type.indexOf(".");
             if (ix > 0 && type.indexOf('.', ix + 1) < 0) {
                 type += getDomain();
