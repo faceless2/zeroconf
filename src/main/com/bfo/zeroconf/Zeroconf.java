@@ -1053,7 +1053,7 @@ public class Zeroconf {
             } else if (host.equals(service.getHost()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
                 InetAddress address = r.getAddress();
-                if (!service.addAddress(address)) {
+                if (!service.addAddress(address, packet.getNetworkInterface())) {
                     service = null;
                 }
                 expire(host + " " + address, r.getTTL(), new Runnable() {
