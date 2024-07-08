@@ -70,6 +70,7 @@ public class Zeroconf {
     private ListenerThread thread;
     private String hostname, domain;
     private InetAddress address;
+    private boolean enable_ipv4 = true, enable_ipv6 = true;
     private final CopyOnWriteArrayList<ZeroconfListener> listeners;
     private final Map<Service,Packet> announceServices;
     private final Map<String,Service> heardServices;    // keyed on FQDN and also "!" + hostname
@@ -215,6 +216,28 @@ public class Zeroconf {
             throw new NullPointerException("Domain cannot be null");
         }
         this.domain = domain;
+        return this;
+    }
+
+    /**
+     * Set whether announcements should be made on IPv4 addresses (default=true)
+     * @param ipv4 whether to announce on IPv4 addresses
+     * @return this
+     * @since 1.0.1
+     */
+    public Zeroconf setIPv4(boolean ipv4) {
+        this.enable_ipv4 = ipv4;
+        return this;
+    }
+
+    /**
+     * Set whether announcements should be made on IPv6 addresses (default=true)
+     * @param ipv6 whether to announce on IPv4 addresses
+     * @return this
+     * @since 1.0.1
+     */
+    public Zeroconf setIPv6(boolean ipv6) {
+        this.enable_ipv6 = ipv6;
         return this;
     }
 
@@ -525,9 +548,13 @@ public class Zeroconf {
                 for (Enumeration<InetAddress> e = nic.getInetAddresses();e.hasMoreElements();) {
                     InetAddress a = e.nextElement();
                     if (!a.isLoopbackAddress() && !a.isMulticastAddress()) {
-                        ipv4 |= a instanceof Inet4Address;
-                        ipv6 |= a instanceof Inet6Address;
-                        newlist.add(a);
+                        if (a instanceof Inet4Address && enable_ipv4) {
+                            ipv4 = true;
+                            newlist.add(a);
+                        } else if (a instanceof Inet6Address && enable_ipv6) {
+                            ipv6 = true;
+                            newlist.add(a);
+                        }
                     }
                 }
             }
