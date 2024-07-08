@@ -19,6 +19,7 @@ public class Service {
     private Map<InetAddress,Collection<NetworkInterface>> addresses;
     private Map<String,String> text;
     private long lastAddressRequest;
+    boolean cancelled;  // This flag required becuase changes may happen after it is cancelled, which makes it look like a remote service.
 
     Service(Zeroconf zeroconf, String fqdn, String name, String type, String domain) {
         this.zeroconf = zeroconf;
@@ -118,6 +119,9 @@ public class Service {
 
     boolean addAddress(InetAddress address, NetworkInterface nic) {
         if (addresses == LOCAL) {
+            if (cancelled) {
+                return false;
+            }
             throw new IllegalStateException("Local addresses");
         }
         Collection<NetworkInterface> nics = addresses.get(address);
@@ -133,6 +137,9 @@ public class Service {
 
     boolean removeAddress(InetAddress address) {
         if (addresses == LOCAL) {
+            if (cancelled) {
+                return false;
+            }
             throw new IllegalStateException("Local addresses");
         }
         return addresses.remove(address) != null;
@@ -264,7 +271,11 @@ public class Service {
      * @return true if the service was announced, false if it already exists on the network.
      */
     public boolean announce() {
-        return zeroconf.announce(this);
+        if (zeroconf.announce(this)) {
+            cancelled = false;
+            return true;
+        }
+        return false;
     }
 
     /** 
@@ -272,7 +283,11 @@ public class Service {
      * @return true if the service was announced and is now cancelled, false if it was not announced or announced by someone else.
      */
     public boolean cancel() {
-        return zeroconf.unannounce(this);
+        if (zeroconf.unannounce(this)) {
+            cancelled = true;
+            return true;
+        }
+        return false;
     }
 
     public int hashCode() {
