@@ -10,7 +10,7 @@ public class Test {
     }
 
     public static void main(String[] args) throws Exception {
-        Zeroconf zeroconf = new Zeroconf();
+        Zeroconf zeroconf = new Zeroconf().setIPv4(true).setIPv6(true);
         // zeroconf.getNetworkInterfaces().clear();
         zeroconf.addListener(new ZeroconfListener() {
             @Override public void packetSent(Packet packet) {

@@ -10,15 +10,16 @@ import java.util.*;
  */
 public class Service {
 
-    private static final List<InetAddress> LOCAL = Collections.<InetAddress>unmodifiableList(new ArrayList<InetAddress>(0));
+    private static final Map<InetAddress,Collection<NetworkInterface>> LOCAL = Collections.<InetAddress,Collection<NetworkInterface>>unmodifiableMap(new HashMap<InetAddress,Collection<NetworkInterface>>());
 
     private final Zeroconf zeroconf;
     private final String fqdn, name, type, domain;      // Store FQDN because it may not be escaped properly. Store it exactly as we hear it
     private String host;
     private int port;
-    private List<InetAddress> addresses;
+    private Map<InetAddress,Collection<NetworkInterface>> addresses;
     private Map<String,String> text;
     private long lastAddressRequest;
+    boolean cancelled;  // This flag required becuase changes may happen after it is cancelled, which makes it look like a remote service.
 
     Service(Zeroconf zeroconf, String fqdn, String name, String type, String domain) {
         this.zeroconf = zeroconf;
@@ -26,7 +27,7 @@ public class Service {
         this.name = name;
         this.type = type;
         this.domain = domain;
-        this.addresses = new ArrayList<InetAddress>();
+        this.addresses = new LinkedHashMap<InetAddress,Collection<NetworkInterface>>();
     }
 
     Service(Zeroconf zeroconf, String fqdn) {
@@ -39,7 +40,7 @@ public class Service {
         this.name = l.get(0);
         this.type = l.get(1);
         this.domain = l.get(2);
-        this.addresses = new ArrayList<InetAddress>();
+        this.addresses = new LinkedHashMap<InetAddress,Collection<NetworkInterface>>();
     }
 
     /**
@@ -116,22 +117,32 @@ public class Service {
         return false;
     }
 
-    boolean addAddress(InetAddress address) {
+    boolean addAddress(InetAddress address, NetworkInterface nic) {
         if (addresses == LOCAL) {
+            if (cancelled) {
+                return false;
+            }
             throw new IllegalStateException("Local addresses");
         }
-        if (!addresses.contains(address)) {
-            addresses.add(address);
-            return true;
+        Collection<NetworkInterface> nics = addresses.get(address);
+        boolean created = nics == null;
+        if (nics == null) {
+            addresses.put(address, nics = new ArrayList<NetworkInterface>());
         }
-        return false;
+        if (nic != null && !nics.contains(nic)) {
+            nics.add(nic);
+        }
+        return created;
     }
 
     boolean removeAddress(InetAddress address) {
         if (addresses == LOCAL) {
+            if (cancelled) {
+                return false;
+            }
             throw new IllegalStateException("Local addresses");
         }
-        return addresses.remove(address);
+        return addresses.remove(address) != null;
     }
 
     /**
@@ -229,8 +240,30 @@ public class Service {
                     zeroconf.query(type, name, Record.TYPE_A);
                 }
             }
-            return Collections.<InetAddress>unmodifiableList(addresses);
+            return Collections.<InetAddress>unmodifiableCollection(addresses.keySet());
         }
+    }
+
+    /**
+     * Return a read-only collection of NetworkInterfaces this service was announced on.
+     * If the service is one being announced locally, the collection has the same values as
+     * {@link Zeroconf#getNetworkInterfaces}
+     * @since 1.0.1
+     */
+    public Collection<NetworkInterface> getNetworkInterfaces() {
+        List<NetworkInterface> nics = new ArrayList<NetworkInterface>();
+        if (host == null) {
+            nics.addAll(zeroconf.getNetworkInterfaces());
+        } else {
+            for (Collection<NetworkInterface> l : addresses.values()) {
+                for (NetworkInterface nic : l) {
+                    if (!nics.contains(nic)) {
+                        nics.add(nic);
+                    }
+                }
+            }
+        }
+        return Collections.<NetworkInterface>unmodifiableCollection(nics);
     }
 
     /**
@@ -238,7 +271,11 @@ public class Service {
      * @return true if the service was announced, false if it already exists on the network.
      */
     public boolean announce() {
-        return zeroconf.announce(this);
+        if (zeroconf.announce(this)) {
+            cancelled = false;
+            return true;
+        }
+        return false;
     }
 
     /** 
@@ -246,7 +283,11 @@ public class Service {
      * @return true if the service was announced and is now cancelled, false if it was not announced or announced by someone else.
      */
     public boolean cancel() {
-        return zeroconf.unannounce(this);
+        if (zeroconf.unannounce(this)) {
+            cancelled = true;
+            return true;
+        }
+        return false;
     }
 
     public int hashCode() {
@@ -297,11 +338,28 @@ public class Service {
         }
         if (addresses != LOCAL) {
             sb.append(",\"addresses\":[");
-            for (int i=0;i<addresses.size();i++) {
-                if (i > 0) {
+            boolean first = true;
+            for (Map.Entry<InetAddress,Collection<NetworkInterface>> e : addresses.entrySet()) {
+                InetAddress address = e.getKey();
+                Collection<NetworkInterface> nics = e.getValue();
+                if (!first) {
                     sb.append(',');
                 }
-                sb.append(quote(addresses.get(i).toString()));
+                StringBuilder sb2 = new StringBuilder();
+                sb2.append(address.toString());
+                if (!nics.isEmpty()) {
+                    sb2.append("(");
+                    boolean first2 = true;
+                    for (NetworkInterface nic : nics) {
+                        if (!first2) {
+                            sb2.append(',');
+                        }
+                        sb2.append(nic.getName());
+                    }
+                    sb2.append(")");
+                }
+                first = false;
+                sb.append(quote(sb2.toString()));
             }
             sb.append("]");
         }
@@ -515,9 +573,9 @@ public class Service {
             Service service = new Service(zeroconf, sb.toString(), name, type, domain);
             service.setHost(host, port);
             if (!addresses.isEmpty()) {
-                service.addresses = new ArrayList<InetAddress>();
+                service.addresses = new LinkedHashMap<InetAddress,Collection<NetworkInterface>>();
                 for (InetAddress address : addresses) {
-                    service.addAddress(address);
+                    service.addAddress(address, null);
                 }
             } else {
                 service.addresses = LOCAL;
