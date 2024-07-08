@@ -741,9 +741,9 @@ public class Zeroconf {
         }
         processQuestions(packet);
         Collection<Service> mod = null, add = null;
-        // answers-ptr, additionals-ptr, answers-srv, additionals-srv, additionals-other
-        for (int pass=0;pass<5;pass++) {
-            for (Record r : pass == 0 || pass == 2 ? packet.getAnswers() : packet.getAdditionals()) {
+        // answers-ptr, additionals-ptr, answers-srv, additionals-srv, answers-other, additionals-other
+        for (int pass=0;pass<6;pass++) {
+            for (Record r : pass == 0 || pass == 2 || pass == 4 ? packet.getAnswers() : packet.getAdditionals()) {
                 boolean ok = false;
                 switch (pass) {
                     case 0:
