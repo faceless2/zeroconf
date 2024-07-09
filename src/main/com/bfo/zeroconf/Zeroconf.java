@@ -67,7 +67,7 @@ public class Zeroconf {
         }
     }
 
-    private ListenerThread thread;
+    private final ListenerThread thread;
     private String hostname, domain;
     private InetAddress address;
     private boolean enable_ipv4 = true, enable_ipv6 = true;
@@ -151,6 +151,7 @@ public class Zeroconf {
 
     /** 
      * Close down this Zeroconf object and cancel any services it has advertised.
+     * Once closed, a Zeroconf object cannot be reopened.
      * @throws InterruptedException if we couldn't rejoin the listener thread
      */
     public void close() throws InterruptedException {
@@ -430,41 +431,43 @@ public class Zeroconf {
         return false;
     }
 
+    private static final int STATE_NEW = 0, STATE_RUNNING = 1, STATE_CANCELLED = 2;
+
     /**
      * The thread that listens to one or more Multicast DatagramChannels using a Selector,
      * waiting for incoming packets. This wait can be also interupted and a packet sent.
      */
     private class ListenerThread extends Thread {
-        private volatile boolean cancelled;
-        private Deque<Packet> sendq;
-        private List<NicSelectionKey> channels;
-        private Map<NetworkInterface,List<InetAddress>> localAddresses;
-        private Selector selector;
+        private volatile int state = STATE_NEW;
+        private final Deque<Packet> sendq;
+        private final List<NicSelectionKey> channels;
+        private final Map<NetworkInterface,List<InetAddress>> localAddresses;
+        private final Selector selector;
 
         ListenerThread() {
             setDaemon(true);
             sendq = new ArrayDeque<Packet>();
             channels = new ArrayList<NicSelectionKey>();
             localAddresses = new HashMap<NetworkInterface,List<InetAddress>>();
-        }
-
-        private synchronized Selector getSelector() throws IOException {
-            if (selector == null) {
+            Selector selector = null;
+            try {
                 selector = Selector.open();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
-            return selector;
+            this.selector = selector;
         }
 
         /**
          * Stop the thread and rejoin
          */
         synchronized void close() throws InterruptedException {
-            this.cancelled = true;
-            if (selector != null) {
+            if (state == STATE_RUNNING) {
+                state = STATE_CANCELLED;
                 selector.wakeup();
-                if (isAlive()) {
-                    join();
-                }
+                join();
+            } else {
+                state = STATE_CANCELLED;
             }
         }
 
@@ -473,10 +476,7 @@ public class Zeroconf {
          */
         synchronized void push(Packet packet) {
             sendq.addLast(packet);
-            if (selector != null) {
-                // Only send if we have a Nic
-                selector.wakeup();
-            }
+            selector.wakeup();
         }
 
         /**
@@ -496,11 +496,11 @@ public class Zeroconf {
                     localAddresses.put(nic, new ArrayList<InetAddress>());
                     changed = processTopologyChange(nic, false);
                     if (changed) {
-                        if (!isAlive()) {
+                        if (state == STATE_NEW) {
+                            state = STATE_RUNNING;
                             start();
-                        } else {
-                            getSelector().wakeup();
                         }
+                        selector.wakeup();
                     }
                 }
             }
@@ -521,10 +521,8 @@ public class Zeroconf {
                 if (localAddresses.containsKey(nic)) {
                     changed = processTopologyChange(nic, true);
                     localAddresses.remove(nic);
-                    if (localAddresses.isEmpty()) {
-                        close();
-                    } else if (changed) {
-                        getSelector().wakeup();
+                    if (changed) {
+                        selector.wakeup();
                     }
                 }
             }
@@ -569,7 +567,7 @@ public class Zeroconf {
                         channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                         channel.bind(new InetSocketAddress(PORT));
                         channel.join(BROADCAST4.getAddress(), nic);
-                        channels.add(new NicSelectionKey(nic, BROADCAST4, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
+                        channels.add(new NicSelectionKey(nic, BROADCAST4, channel.register(selector, SelectionKey.OP_READ, nic)));
                     } catch (Exception e) {
                         // Don't report, this method is called regularly and what is the user going to do about it?
                         // e.printStackTrace();
@@ -591,7 +589,7 @@ public class Zeroconf {
                         channel.setOption(StandardSocketOptions.IP_MULTICAST_IF, nic);
                         channel.bind(new InetSocketAddress(PORT));
                         channel.join(BROADCAST6.getAddress(), nic);
-                        channels.add(new NicSelectionKey(nic, BROADCAST6, channel.register(getSelector(), SelectionKey.OP_READ, nic)));
+                        channels.add(new NicSelectionKey(nic, BROADCAST6, channel.register(selector, SelectionKey.OP_READ, nic)));
                     } catch (Exception e) {
                         // Don't report, this method is called regularly and what is the user going to do about it?
                         // e.printStackTrace();
@@ -659,7 +657,7 @@ public class Zeroconf {
                 // Not the end of the world if it happens
                 Thread.sleep(100);
             } catch (InterruptedException e) {}
-            while (!cancelled) {
+            while (state == STATE_RUNNING) {
                 ((Buffer)buf).clear();
                 try {
                     Packet packet = pop();
@@ -697,7 +695,7 @@ public class Zeroconf {
                         }
                     }
 
-                    // We know selector exists
+                    // Could wait indefinitely, but waking every 5s isn't going to do much harm
                     selector.select(5000);
                     for (Iterator<SelectionKey> i=selector.selectedKeys().iterator();i.hasNext();) {
                         SelectionKey key = i.next();
