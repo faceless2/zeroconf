@@ -67,7 +67,7 @@ public class Zeroconf {
         }
     }
 
-    private ListenerThread thread;
+    private final ListenerThread thread;
     private String hostname, domain;
     private InetAddress address;
     private boolean enable_ipv4 = true, enable_ipv6 = true;
