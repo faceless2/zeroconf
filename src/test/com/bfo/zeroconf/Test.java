@@ -1,6 +1,7 @@
 package com.bfo.zeroconf;
 
 import java.time.*;
+import java.util.*;
 import java.net.*;
 
 public class Test {
@@ -11,7 +12,10 @@ public class Test {
 
     public static void main(String[] args) throws Exception {
         Zeroconf zeroconf = new Zeroconf().setIPv4(true).setIPv6(true);
-        // zeroconf.getNetworkInterfaces().clear();
+//        List<NetworkInterface> all = new ArrayList<NetworkInterface>(zeroconf.getNetworkInterfaces());
+//        zeroconf.getNetworkInterfaces().clear();
+//        zeroconf.getNetworkInterfaces().add(NetworkInterface.getByName("en0"));
+//        zeroconf.getNetworkInterfaces().addAll(all);
         zeroconf.addListener(new ZeroconfListener() {
             @Override public void packetSent(Packet packet) {
                 System.out.println(now() + "packetSend:        " + packet);
