@@ -271,7 +271,8 @@ loadScripts(document, 'script');</script>
 <h3>close</h3>
 <div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type">void</span>&nbsp;<span class="element-name">close</span>()
            throws <span class="exceptions"><a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/InterruptedException.html" title="class or interface in java.lang" class="external-link">InterruptedException</a></span></div>
-<div class="block">Close down this Zeroconf object and cancel any services it has advertised.</div>
+<div class="block">Close down this Zeroconf object and cancel any services it has advertised.
+ Once closed, a Zeroconf object cannot be reopened.</div>
 <dl class="notes">
 <dt>Throws:</dt>
 <dd><code><a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/InterruptedException.html" title="class or interface in java.lang" class="external-link">InterruptedException</a></code> - if we couldn't rejoin the listener thread</dd>
