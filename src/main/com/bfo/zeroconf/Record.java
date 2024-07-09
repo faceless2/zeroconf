@@ -27,7 +27,7 @@ final class Record {
     private int ttl;
 
     /**
-     * @param tyoe the type
+     * @param type the type
      * @param clazz the class - seems to have no real impact
      * @param ttl the ttl in seconds
      * @param name the name
@@ -100,6 +100,54 @@ final class Record {
     //----------------------------------------------------
     // Static creation methods
     //----------------------------------------------------
+
+    /**
+     * Parse the output of Stringify.parse(record.toString()) back into a Record.
+     */
+    static Record parse(Map<String,Object> m) {
+        int type;
+        if (m.get("type") instanceof String) {
+            switch ((String)m.get("type")) {
+                case "ptr": type = TYPE_PTR; break;
+                case "txt": type = TYPE_TXT; break;
+                case "cname": type = TYPE_CNAME; break;
+                case "nsec": type = TYPE_NSEC; break;
+                case "a": type = TYPE_A; break;
+                case "aaaa": type = TYPE_AAAA; break;
+                case "srv": type = TYPE_SRV; break;
+                case "any": type = TYPE_ANY; break;
+                default: throw new IllegalArgumentException("Invalid type \"" + m.get("type") + "\"");
+            }
+        } else {
+            type = ((Integer)m.get("type")).intValue();
+        }
+        int clazz = ((Integer)m.get("class")).intValue();
+        int ttl = ((Integer)m.get("ttl")).intValue();
+        String name = (String)m.get("name");
+        Object data = null;
+        if (type == TYPE_PTR) {
+            data = m.get("value");
+        } else if (type == TYPE_A || type == TYPE_AAAA) {
+            try {
+                data = InetAddress.getByName((String)m.get("address"));
+            } catch (UnknownHostException e) {
+                throw new IllegalArgumentException("Invalid address \"" + m.get("address") + "\"", e);
+            }
+        } else if (type == TYPE_TXT) {
+            data = m.get("data");
+        } else if (type == TYPE_SRV) {
+            if (m.get("host") != null) {
+                String host = (String)m.get("host");
+                int port = (Integer)m.get("port");
+                int priority = (Integer)m.get("priority");
+                int weight = (Integer)m.get("weight");
+                data = new SrvData(priority, weight, port, host);
+            }
+        } else if (m.get("bytes") instanceof String) {
+            data = Stringify.parseHex((String)m.get("bytes"));
+        }
+        return new Record(type, clazz, ttl, name, data);
+    }
 
     /**
      * Create a new Question
@@ -297,7 +345,7 @@ final class Record {
         System.arraycopy(buf.array(), 0, out, 0, out.length);
         String s = readName(ByteBuffer.wrap(out, 0, out.length));
         if (!s.equals(name)) {
-            throw new IllegalStateException("Wrong name: " + Service.quote(name) + " != " + Service.quote(s));
+            throw new IllegalStateException("Wrong name: " + Stringify.toString(name) + " != " + Stringify.toString(s));
         }
         return out;
     }
@@ -348,7 +396,7 @@ final class Record {
         if (end >= 0) {
             ((Buffer)in).position(end);
         }
-//        System.out.println("STRINGLIST OUT: " + Service.quote(sb.toString()));
+//        System.out.println("STRINGLIST OUT: " + Stringify.toString(sb.toString()));
         return sb.toString();
     }
 
@@ -368,7 +416,7 @@ final class Record {
              default:           sb.append(Integer.toString(type));
         }
         sb.append(",\"name\":");
-        sb.append(Service.quote(getName()));
+        sb.append(Stringify.toString(getName()));
         sb.append(",\"class\":");
         sb.append(clazz);
         sb.append(",\"ttl\":");
@@ -378,18 +426,18 @@ final class Record {
             if (type == TYPE_A || type == TYPE_AAAA) {
                 sb.append(",\"address\":");
                 try {
-                    sb.append(Service.quote(InetAddress.getByAddress(getAddress().getAddress()).toString())); // Remove extra data from tostring
+                    sb.append(Stringify.toString(InetAddress.getByAddress(getAddress().getAddress()).getHostAddress())); // Remove extra data from tostring
                 } catch (Exception e) {
-                    sb.append(Service.quote(getAddress().toString()));
+                    sb.append(Stringify.toString(getAddress().getHostAddress()));
                 }
                 len = 0;
             } else if (type == TYPE_PTR) {
                 sb.append(",\"value\":");
-                sb.append(Service.quote(getPtrValue()));
+                sb.append(Stringify.toString(getPtrValue()));
                 len = 0;
             } else if (type == TYPE_SRV) {
                 sb.append(",\"host\":");
-                sb.append(Service.quote(getSrvHost()));
+                sb.append(Stringify.toString(getSrvHost()));
                 sb.append(",\"port\":" + getSrvPort() + ",\"priority\":" + getSrvPriority() + ",\"weight\":" + getSrvWeight());
                 len = 0;
             } else if (type == TYPE_TXT) {
@@ -401,9 +449,9 @@ final class Record {
                     } else {
                         sb.append(',');
                     }
-                    sb.append(Service.quote(e.getKey()));
+                    sb.append(Stringify.toString(e.getKey()));
                     sb.append(':');
-                    sb.append(Service.quote(e.getValue()));
+                    sb.append(Stringify.toString(e.getValue()));
                 }
                 sb.append("}");
                 len = 0;

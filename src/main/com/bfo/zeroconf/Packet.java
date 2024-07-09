@@ -11,14 +11,71 @@ public class Packet {
 
     private final int id;
     private final int flags;
+    private final long timestamp;
     private final List<Record> questions, answers, authorities, additionals;
     private final NetworkInterface nic;
 
     private static final int FLAG_RESPONSE = 15;
     private static final int FLAG_AA       = 10;
 
+    /**
+     * Create a Packet from its String representation
+     * @param tostring the packets string-format, in the same format as {@link #toString}
+     * @throws IllegalArgumentException if the format is incorrec5
+     * @since 1.0.1
+     */
+    @SuppressWarnings("unchecked") public Packet(String tostring) {
+        Map<String,Object> map = (Map<String,Object>)Stringify.parse(tostring);
+        this.id = ((Integer)map.get("id")).intValue();
+        this.flags = ((Integer)map.get("flags")).intValue();
+        this.timestamp = ((Number)map.get("timestamp")).longValue();
+        NetworkInterface nic = null;
+        if (map.get("nic") instanceof String) {
+            try {
+                nic = NetworkInterface.getByName((String)map.get("nic"));
+            } catch (Exception e) { }
+        }
+        this.nic = nic;
+        if (map.get("questions") instanceof List) {
+            List<Record> l = new ArrayList<Record>();
+            for (Object o : (List<Object>)map.get("questions")) {
+                l.add(Record.parse((Map<String,Object>)o));
+            }
+            this.questions = Collections.<Record>unmodifiableList(l);
+        } else {
+            this.questions = Collections.<Record>emptyList();
+        }
+        if (map.get("answers") instanceof List) {
+            List<Record> l = new ArrayList<Record>();
+            for (Object o : (List<Object>)map.get("answers")) {
+                l.add(Record.parse((Map<String,Object>)o));
+            }
+            this.answers = Collections.<Record>unmodifiableList(l);
+        } else {
+            this.answers = Collections.<Record>emptyList();
+        }
+        if (map.get("additionals") instanceof List) {
+            List<Record> l = new ArrayList<Record>();
+            for (Object o : (List<Object>)map.get("additionals")) {
+                l.add(Record.parse((Map<String,Object>)o));
+            }
+            this.additionals = Collections.<Record>unmodifiableList(l);
+        } else {
+            this.additionals = Collections.<Record>emptyList();
+        }
+        if (map.get("authorities") instanceof List) {
+            List<Record> l = new ArrayList<Record>();
+            for (Object o : (List<Object>)map.get("authorities")) {
+                l.add(Record.parse((Map<String,Object>)o));
+            }
+            this.authorities = Collections.<Record>unmodifiableList(l);
+        } else {
+            this.authorities = Collections.<Record>emptyList();
+        }
+    }
 
     private Packet(int id, int flags, NetworkInterface nic, List<Record> questions, List<Record> answers, List<Record> authorities, List<Record> additionals)  {
+        this.timestamp = System.currentTimeMillis();
         this.id = id;
         this.flags = flags;
         this.nic = nic;
@@ -34,6 +91,7 @@ public class Packet {
      * @param question the question record
      */
     Packet(Record question) {
+        this.timestamp = System.currentTimeMillis();
         this.id = 0;
         this.flags = 0;
         if (question.getType() == Record.TYPE_A) {
@@ -56,6 +114,7 @@ public class Packet {
      * @param additionals the additionals records
      */
     Packet(Packet question, List<Record> answers, List<Record> additionals) {
+        this.timestamp = System.currentTimeMillis();
         this.id = question.id;
         this.nic = question.nic;
         if (additionals == null) {
@@ -84,6 +143,7 @@ public class Packet {
             additionals.add(Record.newAddress(service.getHost(), address));
         }
 
+        this.timestamp = System.currentTimeMillis();
         this.id = 0;
         this.flags = (1<<FLAG_RESPONSE) | (1<<FLAG_AA); // response is required
         this.answers = Collections.<Record>unmodifiableList(answers);
@@ -99,6 +159,7 @@ public class Packet {
      */
     Packet(ByteBuffer in, NetworkInterface nic) {
         try {
+            this.timestamp = System.currentTimeMillis();
             this.nic = nic;
             this.id = in.getShort() & 0xFFFF;
             this.flags = in.getShort() & 0xFFFF;
@@ -264,6 +325,13 @@ public class Packet {
     }
 
     /**
+     * Return the packet timestamp
+     */
+    public long timestamp() {
+        return timestamp;
+    }
+
+    /**
      * Write the packet
      * @param out the ByteByffer to write to
      */
@@ -307,8 +375,15 @@ public class Packet {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"id\":");
         sb.append(id);
+        sb.append(",\"timestamp\":");
+        sb.append(timestamp);
         sb.append(",\"flags\":");
         sb.append(flags);
+        if (nic != null) {
+            sb.append(",\"nic\":\"");
+            sb.append(nic.getName());
+            sb.append("\"");
+        }
         sb.append(",\"response\":" + isResponse());
         if (questions.size() > 0) {
             sb.append(",\"questions\":[");
@@ -367,7 +442,6 @@ public class Packet {
     }
 
     //-------------------------------------------------
-
 
     /*
     public static void main(String[] args) throws Exception {

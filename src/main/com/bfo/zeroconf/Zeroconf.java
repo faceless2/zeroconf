@@ -332,7 +332,7 @@ public class Zeroconf {
             send(new Packet(Record.newQuestion(Record.TYPE_PTR, DISCOVERY)));
         } else {
             if (type != null && type.endsWith(".")) {
-                throw new IllegalArgumentException("Type " + Service.quote(type) + " should not end with a dot");
+                throw new IllegalArgumentException("Type " + Stringify.toString(type) + " should not end with a dot");
             }
             int ix = type.indexOf(".");
             if (ix > 0 && type.indexOf('.', ix + 1) < 0) {
@@ -966,7 +966,7 @@ public class Zeroconf {
                 } else {
                     for (ZeroconfListener listener : listeners) {
                         try {
-                            listener.packetError(packet, "PTR name " + Service.quote(fqdn) + " doesn't end with type " + Service.quote(type));
+                            listener.packetError(packet, "PTR name " + Stringify.toString(fqdn) + " doesn't end with type " + Stringify.toString(type));
                         } catch (Exception e) {
                             log("Listener exception", e);
                         }
@@ -995,7 +995,7 @@ public class Zeroconf {
                 } else {
                     for (ZeroconfListener listener : listeners) {
                         try {
-                            listener.packetError(packet, "Couldn't split SRV name " + Service.quote(fqdn));
+                            listener.packetError(packet, "Couldn't split SRV name " + Stringify.toString(fqdn));
                         } catch (Exception e) {
                             log("Listener exception", e);
                         }

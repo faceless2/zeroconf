@@ -33,7 +33,7 @@ public class Service {
     Service(Zeroconf zeroconf, String fqdn) {
         List<String> l = splitFQDN(fqdn);
         if (l == null) {
-            throw new IllegalArgumentException("Can't split " + quote(fqdn));
+            throw new IllegalArgumentException("Can't split " + Stringify.toString(fqdn));
         }
         this.zeroconf = zeroconf;
         this.fqdn = fqdn;
@@ -310,14 +310,14 @@ public class Service {
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"name\":");
-        sb.append(quote(name));
+        sb.append(Stringify.toString(name));
         sb.append(",\"type\":");
-        sb.append(quote(type));
+        sb.append(Stringify.toString(type));
         sb.append(",\"domain\":");
-        sb.append(quote(domain));
+        sb.append(Stringify.toString(domain));
         if (host != null) {
             sb.append(",\"host\":");
-            sb.append(quote(host));
+            sb.append(Stringify.toString(host));
             sb.append(",\"port\":");
             sb.append(Integer.toString(port));
         }
@@ -330,9 +330,9 @@ public class Service {
                 } else {
                     sb.append(',');
                 }
-                sb.append(quote(e.getKey()));
+                sb.append(Stringify.toString(e.getKey()));
                 sb.append(':');
-                sb.append(quote(e.getValue()));
+                sb.append(Stringify.toString(e.getValue()));
             }
             sb.append('}');
         }
@@ -359,42 +359,11 @@ public class Service {
                     sb2.append(")");
                 }
                 first = false;
-                sb.append(quote(sb2.toString()));
+                sb.append(Stringify.toString(sb2.toString()));
             }
             sb.append("]");
         }
         sb.append("}");
-        return sb.toString();
-    }
-
-    static String quote(String s) {
-        if (s == null) {
-            return s;
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append('"');
-        for (int i=0;i<s.length();i++) {
-            char c = s.charAt(i);
-            if (c == '\n') {
-                sb.append("\\n");
-            } else if (c == '\r') {
-                sb.append("\\r");
-            } else if (c == '\t') {
-                sb.append("\\t");
-            } else if (c == '"') {
-                sb.append("\\\"");
-            } else if (Character.isISOControl(c)) {
-                String t = Integer.toHexString(c);
-                sb.append("\\u");
-                for (int j=t.length();j<4;j++) {
-                    sb.append('0');
-                }
-                sb.append(t);
-            } else {
-                sb.append(c);
-            }
-        }
-        sb.append('"');
         return sb.toString();
     }
 
@@ -419,7 +388,7 @@ public class Service {
             for (int i=0;i<name.length();i++) {
                 char c = name.charAt(i);
                 if (c < 0x20 || c >= 0x7F) {
-                    throw new IllegalArgumentException("Invalid name character U+" + Integer.toHexString(c)+" in " + quote(name));
+                    throw new IllegalArgumentException("Invalid name character U+" + Integer.toHexString(c)+" in " + Stringify.toString(name));
                 }
             }
             this.name = name;
@@ -479,7 +448,7 @@ public class Service {
                 setType(l.get(1));
                 setDomain(l.get(2));
             } else {
-                throw new IllegalArgumentException("Invalid FQDN: " + quote(fqdn) + " can't split");
+                throw new IllegalArgumentException("Invalid FQDN: " + Stringify.toString(fqdn) + " can't split");
             }
             return this;
         }
@@ -586,5 +555,4 @@ public class Service {
             return service;
         }
     }
-
 }
