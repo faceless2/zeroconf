@@ -1007,7 +1007,7 @@ public class Zeroconf {
                 if (getAnnouncedServices().contains(service)) {
                     int ttl = r.getTTL();
                     ttl = Math.min(ttl * 9/10, ttl - 5);        // Refresh at 90% of expiry or at least 5s before
-                    expire(service, r.getTTL(), new Runnable() {
+                    expire(service, ttl, new Runnable() {
                         public void run() {
                             if (getAnnouncedServices().contains(fservice)) {
                                 reannounce(fservice);
