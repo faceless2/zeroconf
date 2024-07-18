@@ -136,11 +136,11 @@ public class Packet {
 
         List<Record> answers = new ArrayList<Record>();
         List<Record> additionals = new ArrayList<Record>();
-        answers.add(Record.newPtr(domain, fqdn));
-        answers.add(Record.newSrv(fqdn, service.getHost(), service.getPort(), 0, 0));
-        answers.add(Record.newTxt(fqdn, service.getText()));    // Seems "txt" is always required
+        answers.add(Record.newPtr(service.getTTL_PTR(), domain, fqdn));
+        answers.add(Record.newSrv(service.getTTL_SRV(), fqdn, service.getHost(), service.getPort(), 0, 0));
+        answers.add(Record.newTxt(service.getTTL_TXT(), fqdn, service.getText()));    // Seems "txt" is always required
         for (InetAddress address : service.getAddresses()) {
-            additionals.add(Record.newAddress(service.getHost(), address));
+            additionals.add(Record.newAddress(service.getTTL_A(), service.getHost(), address));
         }
 
         this.timestamp = System.currentTimeMillis();

@@ -835,11 +835,19 @@ public class Zeroconf {
         List<Record> answers = null, additionals = null;
         for (Record question : packet.getQuestions()) {
             if (question.getName().equals(DISCOVERY) && (question.getType() == Record.TYPE_PTR || question.getType() == Record.TYPE_ANY)) {
+                Map<String,Integer> ttlmap = new HashMap<String,Integer>();
+                // When announcing service types, set the TTL to the max TTL of all the services of that type we're announcing
+                for (Service s : announceServices.keySet()) { 
+                    String type = s.getType();
+                    int ttl = s.getTTL_PTR();
+                    Integer t = ttlmap.get(type);
+                    ttlmap.put(type, Integer.valueOf(t == null ? ttl : Math.max(ttl, t.intValue())));
+                }
                 for (Service s : announceServices.keySet()) { 
                     if (answers == null) {
                         answers = new ArrayList<Record>();
                     }
-                    answers.add(Record.newPtr(DISCOVERY, s.getType()));
+                    answers.add(Record.newPtr(ttlmap.get(s.getType()), DISCOVERY, s.getType()));
                 }
             } else {
                 for (Packet p : announceServices.values()) { 
@@ -1018,7 +1026,6 @@ public class Zeroconf {
                     if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
                         modified = true;
                     }
-                    int ttl = r.getTTL();
                     expire(service, r.getTTL(), new Runnable() {
                         public void run() {
                             heardServices.remove(fqdn);

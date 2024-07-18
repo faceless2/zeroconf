@@ -11,6 +11,11 @@ import java.net.*;
  */
 final class Record {
 
+    static final int TTL_A = 120;
+    static final int TTL_PTR = 28800;
+    static final int TTL_SRV = 120;
+    static final int TTL_TXT = 4500;
+
     static final int TYPE_A     = 0x01;
     static final int TYPE_CNAME = 0x05; // Not used by dns-sd
     static final int TYPE_PTR   = 0x0C;
@@ -163,37 +168,37 @@ final class Record {
      * @param name the name
      * @param address the address
      */
-    static Record newAddress(String name, InetAddress address) {
+    static Record newAddress(int ttl, String name, InetAddress address) {
         if (name == null) {
             throw new IllegalArgumentException("name is null");
         } else if (address instanceof Inet4Address) {
-            return new Record(TYPE_A, CLAZZ, 120, name, address);
+            return new Record(TYPE_A, CLAZZ, ttl, name, address);
         } else if (address instanceof Inet6Address) {
-            return new Record(TYPE_AAAA, CLAZZ, 120, name, address);
+            return new Record(TYPE_AAAA, CLAZZ, ttl, name, address);
         } else {
             throw new IllegalArgumentException("address invalid");
         }
     }
 
-    static Record newPtr(String name, String value) {
+    static Record newPtr(int ttl, String name, String value) {
         if (name == null || value == null) {
             throw new IllegalArgumentException("name or value is null");
         }
-        return new Record(TYPE_PTR, CLAZZ, 28800, name, value);
+        return new Record(TYPE_PTR, CLAZZ, ttl, name, value);
     }
 
-    static Record newSrv(String name, String host, int port, int weight, int priority) {
+    static Record newSrv(int ttl, String name, String host, int port, int weight, int priority) {
         if (name == null || host == null || port < 1 || port > 65535) {
             throw new IllegalArgumentException("name, host or port is invalid");
         }
-        return new Record(TYPE_SRV, CLAZZ, 120, name, new SrvData(priority, weight, port, host));
+        return new Record(TYPE_SRV, CLAZZ, ttl, name, new SrvData(priority, weight, port, host));
     }
 
-    static Record newTxt(String name, Map<String,String> map) {
+    static Record newTxt(int ttl, String name, Map<String,String> map) {
         if (name == null || map == null) {
             throw new IllegalArgumentException("name or map is invalid");
         }
-        return new Record(TYPE_TXT, CLAZZ, 4500, name, map);
+        return new Record(TYPE_TXT, CLAZZ, ttl, name, map);
     }
 
     //----------------------------------------------------

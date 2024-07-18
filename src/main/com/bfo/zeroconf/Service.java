@@ -16,6 +16,10 @@ public class Service {
     private final String fqdn, name, type, domain;      // Store FQDN because it may not be escaped properly. Store it exactly as we hear it
     private String host;
     private int port;
+    private int ttl_srv = Record.TTL_SRV;
+    private int ttl_txt = Record.TTL_TXT;
+    private int ttl_ptr = Record.TTL_PTR;
+    private int ttl_a = Record.TTL_A;
     private Map<InetAddress,Collection<NetworkInterface>> addresses;
     private Map<String,String> text;
     private long lastAddressRequest;
@@ -166,6 +170,19 @@ public class Service {
         sb.append(domain);
         return sb.toString();
         */
+    }
+
+    int getTTL_A() {
+        return ttl_a;
+    }
+    int getTTL_PTR() {
+        return ttl_ptr;
+    }
+    int getTTL_TXT() {
+        return ttl_txt;
+    }
+    int getTTL_SRV() {
+        return ttl_srv;
     }
 
     /**
@@ -371,8 +388,15 @@ public class Service {
      * A Builder class to create a new {@link Service} for announcement
      */
     public static class Builder {
+        private static final int MINTTL = 5;            // 5s seems reasonable?
+        private static final int MAXTTL = 86400;        // 1day seems reasonable?
+
         private String name, type, domain, host;
         private int port = -1;
+        private int ttl_a = Record.TTL_A;
+        private int ttl_srv = Record.TTL_SRV;
+        private int ttl_ptr = Record.TTL_PTR;
+        private int ttl_txt = Record.TTL_TXT;
         private Map<String,String> props = new LinkedHashMap<String,String>();
         private List<InetAddress> addresses = new ArrayList<InetAddress>();
 
@@ -465,6 +489,82 @@ public class Service {
             return this;
         }
         /**
+         * Get the time-to-live in seconds for any "ptr" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_PTR() {
+            return ttl_ptr;
+        }
+        /**
+         * Set the time-to-live in seconds for any "ptr" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_PTR(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_ptr = ttl;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "srv" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_SRV() {
+            return ttl_srv;
+        }
+        /**
+         * Set the time-to-live in seconds for any "srv" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_SRV(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_srv = ttl;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "txt" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_TXT() {
+            return ttl_txt;
+        }
+        /**
+         * Set the time-to-live in seconds for any "txt" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_TXT(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_txt = ttl;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "a" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_A() {
+            return ttl_a;
+        }
+        /**
+         * Set the time-to-live in seconds for any "a" or "aaaa" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_A(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_a = ttl;
+            return this;
+        }
+        /**
          * Add a text value to the Service
          * @param key the text key
          * @param value the text value. If this is null, the key will be added without any "="
@@ -522,7 +622,7 @@ public class Service {
             }
             if (!props.isEmpty()) {
                 try {
-                    Record r = Record.newTxt("text", props);
+                    Record r = Record.newTxt(Record.TTL_TXT, "text", props);
                     r.write(java.nio.ByteBuffer.allocate(8192));
                 } catch (Exception e) {
                     throw (RuntimeException)new IllegalStateException("TXT record is too large").initCause(e);
@@ -552,6 +652,10 @@ public class Service {
             if (!props.isEmpty()) {
                 service.setText(Collections.<String,String>unmodifiableMap(props));
             }
+            service.ttl_a = ttl_a;
+            service.ttl_srv = ttl_srv;
+            service.ttl_ptr = ttl_ptr;
+            service.ttl_txt = ttl_txt;
             return service;
         }
     }
