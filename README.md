@@ -9,7 +9,7 @@ that can both announce and listen for Services:
 * Sent packets include only the A and AAAA records that apply to the interface they're sent on
 * Requires Java 8+ and no other dependencies.
 * Javadocs at [https://faceless2.github.io/zeroconf/docs](https://faceless2.github.io/zeroconf/docs/)
-* Prebuilt binary at [https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.1.jar](https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.1.jar)
+* Prebuilt binary at [https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.2.jar](https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.2.jar)
 
 Here's a simple example which announces a service on all interfaces on the local machine:
 
@@ -28,6 +28,30 @@ service.announce();
 service.cancel();
 // time passes
 zc.close();
+```
+
+To set custom TTLs for each mDNS record type:
+
+```java
+import com.bfo.zeroconf.*;
+
+Zeroconf zc = new Zeroconf();
+Service.Builder builder = new Service.Builder()
+                    .setName("MyWeb")
+                    .setType("_http._tcp")
+                    .setPort(8080)
+                    .put("path", "/path/to/service");
+
+// Custom TTLs for each mDNS record type.
+int ttl = 120;
+builder.setTTL_PTR(ttl);
+builder.setTTL_SRV(ttl);
+builder.setTTL_TXT(ttl);
+builder.setTTL_A(ttl);
+builder.build(zc);
+
+// Announce the service.
+service.announce();
 ```
 
 And to listen, either add a Listener for events or use the live, thread-safe Collection of Services.
