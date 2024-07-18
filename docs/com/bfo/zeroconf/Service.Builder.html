@@ -120,6 +120,26 @@ loadScripts(document, 'script');</script>
 <div class="col-last odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
 <div class="block">Build a new Service which can be announced with <a href="Service.html#announce()"><code>Service.announce()</code></a></div>
 </div>
+<div class="col-first even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code>int</code></div>
+<div class="col-second even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#getTTL_A()" class="member-name-link">getTTL_A</a>()</code></div>
+<div class="col-last even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Get the time-to-live in seconds for any "a" records announced for this service.</div>
+</div>
+<div class="col-first odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code>int</code></div>
+<div class="col-second odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#getTTL_PTR()" class="member-name-link">getTTL_PTR</a>()</code></div>
+<div class="col-last odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Get the time-to-live in seconds for any "ptr" records announced for this service.</div>
+</div>
+<div class="col-first even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code>int</code></div>
+<div class="col-second even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#getTTL_SRV()" class="member-name-link">getTTL_SRV</a>()</code></div>
+<div class="col-last even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Get the time-to-live in seconds for any "srv" records announced for this service.</div>
+</div>
+<div class="col-first odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code>int</code></div>
+<div class="col-second odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#getTTL_TXT()" class="member-name-link">getTTL_TXT</a>()</code></div>
+<div class="col-last odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Get the time-to-live in seconds for any "txt" records announced for this service.</div>
+</div>
 <div class="col-first even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></code></div>
 <div class="col-second even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#put(java.lang.String,java.lang.String)" class="member-name-link">put</a><wbr>(<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a>&nbsp;key,
  <a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a>&nbsp;value)</code></div>
@@ -155,6 +175,26 @@ loadScripts(document, 'script');</script>
 <div class="col-second even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#setPort(int)" class="member-name-link">setPort</a><wbr>(int&nbsp;port)</code></div>
 <div class="col-last even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
 <div class="block">(Required) Set the port to announce.</div>
+</div>
+<div class="col-first odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></code></div>
+<div class="col-second odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#setTTL_A(int)" class="member-name-link">setTTL_A</a><wbr>(int&nbsp;ttl)</code></div>
+<div class="col-last odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Set the time-to-live in seconds for any "a" or "aaaa" records announced for this service.</div>
+</div>
+<div class="col-first even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></code></div>
+<div class="col-second even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#setTTL_PTR(int)" class="member-name-link">setTTL_PTR</a><wbr>(int&nbsp;ttl)</code></div>
+<div class="col-last even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Set the time-to-live in seconds for any "ptr" records announced for this service.</div>
+</div>
+<div class="col-first odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></code></div>
+<div class="col-second odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#setTTL_SRV(int)" class="member-name-link">setTTL_SRV</a><wbr>(int&nbsp;ttl)</code></div>
+<div class="col-last odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Set the time-to-live in seconds for any "srv" records announced for this service.</div>
+</div>
+<div class="col-first even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></code></div>
+<div class="col-second even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#setTTL_TXT(int)" class="member-name-link">setTTL_TXT</a><wbr>(int&nbsp;ttl)</code></div>
+<div class="col-last even-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4">
+<div class="block">Set the time-to-live in seconds for any "txt" records announced for this service.</div>
 </div>
 <div class="col-first odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></code></div>
 <div class="col-second odd-row-color method-summary-table method-summary-table-tab2 method-summary-table-tab4"><code><a href="#setType(java.lang.String)" class="member-name-link">setType</a><wbr>(<a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/String.html" title="class or interface in java.lang" class="external-link">String</a>&nbsp;type)</code></div>
@@ -269,6 +309,102 @@ loadScripts(document, 'script');</script>
 <dl class="notes">
 <dt>Parameters:</dt>
 <dd><code>port</code> - the port, between 0 and 65535. A value of zero means no port.</dd>
+<dt>Returns:</dt>
+<dd>this</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="getTTL_PTR()">
+<h3>getTTL_PTR</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type">int</span>&nbsp;<span class="element-name">getTTL_PTR</span>()</div>
+<div class="block">Get the time-to-live in seconds for any "ptr" records announced for this service.</div>
+<dl class="notes">
+<dt>Returns:</dt>
+<dd>the time-to-live</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="setTTL_PTR(int)">
+<h3>setTTL_PTR</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type"><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></span>&nbsp;<span class="element-name">setTTL_PTR</span><wbr><span class="parameters">(int&nbsp;ttl)</span></div>
+<div class="block">Set the time-to-live in seconds for any "ptr" records announced for this service.</div>
+<dl class="notes">
+<dt>Parameters:</dt>
+<dd><code>ttl</code> - the time-to-live in seconds</dd>
+<dt>Returns:</dt>
+<dd>this</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="getTTL_SRV()">
+<h3>getTTL_SRV</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type">int</span>&nbsp;<span class="element-name">getTTL_SRV</span>()</div>
+<div class="block">Get the time-to-live in seconds for any "srv" records announced for this service.</div>
+<dl class="notes">
+<dt>Returns:</dt>
+<dd>the time-to-live</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="setTTL_SRV(int)">
+<h3>setTTL_SRV</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type"><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></span>&nbsp;<span class="element-name">setTTL_SRV</span><wbr><span class="parameters">(int&nbsp;ttl)</span></div>
+<div class="block">Set the time-to-live in seconds for any "srv" records announced for this service.</div>
+<dl class="notes">
+<dt>Parameters:</dt>
+<dd><code>ttl</code> - the time-to-live in seconds</dd>
+<dt>Returns:</dt>
+<dd>this</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="getTTL_TXT()">
+<h3>getTTL_TXT</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type">int</span>&nbsp;<span class="element-name">getTTL_TXT</span>()</div>
+<div class="block">Get the time-to-live in seconds for any "txt" records announced for this service.</div>
+<dl class="notes">
+<dt>Returns:</dt>
+<dd>the time-to-live</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="setTTL_TXT(int)">
+<h3>setTTL_TXT</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type"><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></span>&nbsp;<span class="element-name">setTTL_TXT</span><wbr><span class="parameters">(int&nbsp;ttl)</span></div>
+<div class="block">Set the time-to-live in seconds for any "txt" records announced for this service.</div>
+<dl class="notes">
+<dt>Parameters:</dt>
+<dd><code>ttl</code> - the time-to-live in seconds</dd>
+<dt>Returns:</dt>
+<dd>this</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="getTTL_A()">
+<h3>getTTL_A</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type">int</span>&nbsp;<span class="element-name">getTTL_A</span>()</div>
+<div class="block">Get the time-to-live in seconds for any "a" records announced for this service.</div>
+<dl class="notes">
+<dt>Returns:</dt>
+<dd>the time-to-live</dd>
+</dl>
+</section>
+</li>
+<li>
+<section class="detail" id="setTTL_A(int)">
+<h3>setTTL_A</h3>
+<div class="member-signature"><span class="modifiers">public</span>&nbsp;<span class="return-type"><a href="Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></span>&nbsp;<span class="element-name">setTTL_A</span><wbr><span class="parameters">(int&nbsp;ttl)</span></div>
+<div class="block">Set the time-to-live in seconds for any "a" or "aaaa" records announced for this service.</div>
+<dl class="notes">
+<dt>Parameters:</dt>
+<dd><code>ttl</code> - the time-to-live in seconds</dd>
 <dt>Returns:</dt>
 <dd>this</dd>
 </dl>

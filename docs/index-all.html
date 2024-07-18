@@ -165,6 +165,22 @@ loadScripts(document, 'script');</script>
 <dd>
 <div class="block">Return an unmodifiable map containing the text</div>
 </dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#getTTL_A()" class="member-name-link">getTTL_A()</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Get the time-to-live in seconds for any "a" records announced for this service.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#getTTL_PTR()" class="member-name-link">getTTL_PTR()</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Get the time-to-live in seconds for any "ptr" records announced for this service.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#getTTL_SRV()" class="member-name-link">getTTL_SRV()</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Get the time-to-live in seconds for any "srv" records announced for this service.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#getTTL_TXT()" class="member-name-link">getTTL_TXT()</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Get the time-to-live in seconds for any "txt" records announced for this service.</div>
+</dd>
 <dt><a href="com/bfo/zeroconf/Service.html#getType()" class="member-name-link">getType()</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.html" title="class in com.bfo.zeroconf">Service</a></dt>
 <dd>
 <div class="block">Return the type for this service, a combination of the service type and protocol, eg "_http.</div>
@@ -184,6 +200,10 @@ loadScripts(document, 'script');</script>
 <dt><a href="com/bfo/zeroconf/Packet.html" class="type-name-link" title="class in com.bfo.zeroconf">Packet</a> - Class in <a href="com/bfo/zeroconf/package-summary.html">com.bfo.zeroconf</a></dt>
 <dd>
 <div class="block">A Service Dicovery Packet.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Packet.html#%3Cinit%3E(java.lang.String)" class="member-name-link">Packet(String)</a> - Constructor for class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Packet.html" title="class in com.bfo.zeroconf">Packet</a></dt>
+<dd>
+<div class="block">Create a Packet from its String representation</div>
 </dd>
 <dt><a href="com/bfo/zeroconf/ZeroconfListener.html#packetError(com.bfo.zeroconf.Packet,java.lang.String)" class="member-name-link">packetError(Packet, String)</a> - Method in interface com.bfo.zeroconf.<a href="com/bfo/zeroconf/ZeroconfListener.html" title="interface in com.bfo.zeroconf">ZeroconfListener</a></dt>
 <dd>
@@ -287,6 +307,22 @@ loadScripts(document, 'script');</script>
 <dd>
 <div class="block">(Required) Set the port to announce.</div>
 </dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#setTTL_A(int)" class="member-name-link">setTTL_A(int)</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Set the time-to-live in seconds for any "a" or "aaaa" records announced for this service.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#setTTL_PTR(int)" class="member-name-link">setTTL_PTR(int)</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Set the time-to-live in seconds for any "ptr" records announced for this service.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#setTTL_SRV(int)" class="member-name-link">setTTL_SRV(int)</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Set the time-to-live in seconds for any "srv" records announced for this service.</div>
+</dd>
+<dt><a href="com/bfo/zeroconf/Service.Builder.html#setTTL_TXT(int)" class="member-name-link">setTTL_TXT(int)</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
+<dd>
+<div class="block">Set the time-to-live in seconds for any "txt" records announced for this service.</div>
+</dd>
 <dt><a href="com/bfo/zeroconf/Service.Builder.html#setType(java.lang.String)" class="member-name-link">setType(String)</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Service.Builder.html" title="class in com.bfo.zeroconf">Service.Builder</a></dt>
 <dd>
 <div class="block">(Required) Set the service type - a combination of the service name and protocol, eg "_http.</div>
@@ -294,6 +330,10 @@ loadScripts(document, 'script');</script>
 </dl>
 <h2 class="title" id="I:T">T</h2>
 <dl class="index">
+<dt><a href="com/bfo/zeroconf/Packet.html#timestamp()" class="member-name-link">timestamp()</a> - Method in class com.bfo.zeroconf.<a href="com/bfo/zeroconf/Packet.html" title="class in com.bfo.zeroconf">Packet</a></dt>
+<dd>
+<div class="block">Return the packet timestamp</div>
+</dd>
 <dt><a href="com/bfo/zeroconf/ZeroconfListener.html#topologyChange(java.net.NetworkInterface)" class="member-name-link">topologyChange(NetworkInterface)</a> - Method in interface com.bfo.zeroconf.<a href="com/bfo/zeroconf/ZeroconfListener.html" title="interface in com.bfo.zeroconf">ZeroconfListener</a></dt>
 <dd>
 <div class="block">Called when the Zeroconf class detects a network topology change on an interdace</div>
