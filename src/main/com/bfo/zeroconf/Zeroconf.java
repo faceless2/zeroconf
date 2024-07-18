@@ -332,7 +332,7 @@ public class Zeroconf {
             send(new Packet(Record.newQuestion(Record.TYPE_PTR, DISCOVERY)));
         } else {
             if (type != null && type.endsWith(".")) {
-                throw new IllegalArgumentException("Type " + Service.quote(type) + " should not end with a dot");
+                throw new IllegalArgumentException("Type " + Stringify.toString(type) + " should not end with a dot");
             }
             int ix = type.indexOf(".");
             if (ix > 0 && type.indexOf('.', ix + 1) < 0) {
@@ -835,11 +835,19 @@ public class Zeroconf {
         List<Record> answers = null, additionals = null;
         for (Record question : packet.getQuestions()) {
             if (question.getName().equals(DISCOVERY) && (question.getType() == Record.TYPE_PTR || question.getType() == Record.TYPE_ANY)) {
+                Map<String,Integer> ttlmap = new HashMap<String,Integer>();
+                // When announcing service types, set the TTL to the max TTL of all the services of that type we're announcing
+                for (Service s : announceServices.keySet()) { 
+                    String type = s.getType();
+                    int ttl = s.getTTL_PTR();
+                    Integer t = ttlmap.get(type);
+                    ttlmap.put(type, Integer.valueOf(t == null ? ttl : Math.max(ttl, t.intValue())));
+                }
                 for (Service s : announceServices.keySet()) { 
                     if (answers == null) {
                         answers = new ArrayList<Record>();
                     }
-                    answers.add(Record.newPtr(DISCOVERY, s.getType()));
+                    answers.add(Record.newPtr(ttlmap.get(s.getType()), DISCOVERY, s.getType()));
                 }
             } else {
                 for (Packet p : announceServices.values()) { 
@@ -966,7 +974,7 @@ public class Zeroconf {
                 } else {
                     for (ZeroconfListener listener : listeners) {
                         try {
-                            listener.packetError(packet, "PTR name " + Service.quote(fqdn) + " doesn't end with type " + Service.quote(type));
+                            listener.packetError(packet, "PTR name " + Stringify.toString(fqdn) + " doesn't end with type " + Stringify.toString(type));
                         } catch (Exception e) {
                             log("Listener exception", e);
                         }
@@ -995,7 +1003,7 @@ public class Zeroconf {
                 } else {
                     for (ZeroconfListener listener : listeners) {
                         try {
-                            listener.packetError(packet, "Couldn't split SRV name " + Service.quote(fqdn));
+                            listener.packetError(packet, "Couldn't split SRV name " + Stringify.toString(fqdn));
                         } catch (Exception e) {
                             log("Listener exception", e);
                         }
@@ -1007,7 +1015,7 @@ public class Zeroconf {
                 if (getAnnouncedServices().contains(service)) {
                     int ttl = r.getTTL();
                     ttl = Math.min(ttl * 9/10, ttl - 5);        // Refresh at 90% of expiry or at least 5s before
-                    expire(service, r.getTTL(), new Runnable() {
+                    expire(service, ttl, new Runnable() {
                         public void run() {
                             if (getAnnouncedServices().contains(fservice)) {
                                 reannounce(fservice);
@@ -1018,7 +1026,6 @@ public class Zeroconf {
                     if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
                         modified = true;
                     }
-                    int ttl = r.getTTL();
                     expire(service, r.getTTL(), new Runnable() {
                         public void run() {
                             heardServices.remove(fqdn);

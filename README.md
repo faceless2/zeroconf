@@ -60,6 +60,24 @@ for (Service s : zc.getServices()) {
 zc.close();
 ```
 
+To disable IPv6 support, and to only listen on a single network interface with a given IP address, use:
+
+```java
+Zeroconf zc = new Zeroconf();
+zc.setIPv6(false);
+zc.setLocalHostName(ip);
+
+// Add the single NIC with the given IP.
+NetworkInterface nic = NetworkUtils.findIPv4NICForIP(ip);
+if (nic != null) {
+    // Remove all configured NICs.
+    zc.getNetworkInterfaces().clear();
+
+    // Add the IPv4 NIC.
+    zc.getNetworkInterfaces().add(nic);
+}
+```
+
 To build
 --
 

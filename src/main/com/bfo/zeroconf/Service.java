@@ -16,6 +16,10 @@ public class Service {
     private final String fqdn, name, type, domain;      // Store FQDN because it may not be escaped properly. Store it exactly as we hear it
     private String host;
     private int port;
+    private int ttl_srv = Record.TTL_SRV;
+    private int ttl_txt = Record.TTL_TXT;
+    private int ttl_ptr = Record.TTL_PTR;
+    private int ttl_a = Record.TTL_A;
     private Map<InetAddress,Collection<NetworkInterface>> addresses;
     private Map<String,String> text;
     private long lastAddressRequest;
@@ -33,7 +37,7 @@ public class Service {
     Service(Zeroconf zeroconf, String fqdn) {
         List<String> l = splitFQDN(fqdn);
         if (l == null) {
-            throw new IllegalArgumentException("Can't split " + quote(fqdn));
+            throw new IllegalArgumentException("Can't split " + Stringify.toString(fqdn));
         }
         this.zeroconf = zeroconf;
         this.fqdn = fqdn;
@@ -166,6 +170,19 @@ public class Service {
         sb.append(domain);
         return sb.toString();
         */
+    }
+
+    int getTTL_A() {
+        return ttl_a;
+    }
+    int getTTL_PTR() {
+        return ttl_ptr;
+    }
+    int getTTL_TXT() {
+        return ttl_txt;
+    }
+    int getTTL_SRV() {
+        return ttl_srv;
     }
 
     /**
@@ -310,14 +327,14 @@ public class Service {
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"name\":");
-        sb.append(quote(name));
+        sb.append(Stringify.toString(name));
         sb.append(",\"type\":");
-        sb.append(quote(type));
+        sb.append(Stringify.toString(type));
         sb.append(",\"domain\":");
-        sb.append(quote(domain));
+        sb.append(Stringify.toString(domain));
         if (host != null) {
             sb.append(",\"host\":");
-            sb.append(quote(host));
+            sb.append(Stringify.toString(host));
             sb.append(",\"port\":");
             sb.append(Integer.toString(port));
         }
@@ -330,9 +347,9 @@ public class Service {
                 } else {
                     sb.append(',');
                 }
-                sb.append(quote(e.getKey()));
+                sb.append(Stringify.toString(e.getKey()));
                 sb.append(':');
-                sb.append(quote(e.getValue()));
+                sb.append(Stringify.toString(e.getValue()));
             }
             sb.append('}');
         }
@@ -359,7 +376,7 @@ public class Service {
                     sb2.append(")");
                 }
                 first = false;
-                sb.append(quote(sb2.toString()));
+                sb.append(Stringify.toString(sb2.toString()));
             }
             sb.append("]");
         }
@@ -367,43 +384,19 @@ public class Service {
         return sb.toString();
     }
 
-    static String quote(String s) {
-        if (s == null) {
-            return s;
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append('"');
-        for (int i=0;i<s.length();i++) {
-            char c = s.charAt(i);
-            if (c == '\n') {
-                sb.append("\\n");
-            } else if (c == '\r') {
-                sb.append("\\r");
-            } else if (c == '\t') {
-                sb.append("\\t");
-            } else if (c == '"') {
-                sb.append("\\\"");
-            } else if (Character.isISOControl(c)) {
-                String t = Integer.toHexString(c);
-                sb.append("\\u");
-                for (int j=t.length();j<4;j++) {
-                    sb.append('0');
-                }
-                sb.append(t);
-            } else {
-                sb.append(c);
-            }
-        }
-        sb.append('"');
-        return sb.toString();
-    }
-
     /**
      * A Builder class to create a new {@link Service} for announcement
      */
     public static class Builder {
+        private static final int MINTTL = 5;            // 5s seems reasonable?
+        private static final int MAXTTL = 86400;        // 1day seems reasonable?
+
         private String name, type, domain, host;
         private int port = -1;
+        private int ttl_a = Record.TTL_A;
+        private int ttl_srv = Record.TTL_SRV;
+        private int ttl_ptr = Record.TTL_PTR;
+        private int ttl_txt = Record.TTL_TXT;
         private Map<String,String> props = new LinkedHashMap<String,String>();
         private List<InetAddress> addresses = new ArrayList<InetAddress>();
 
@@ -419,7 +412,7 @@ public class Service {
             for (int i=0;i<name.length();i++) {
                 char c = name.charAt(i);
                 if (c < 0x20 || c >= 0x7F) {
-                    throw new IllegalArgumentException("Invalid name character U+" + Integer.toHexString(c)+" in " + quote(name));
+                    throw new IllegalArgumentException("Invalid name character U+" + Integer.toHexString(c)+" in " + Stringify.toString(name));
                 }
             }
             this.name = name;
@@ -479,7 +472,7 @@ public class Service {
                 setType(l.get(1));
                 setDomain(l.get(2));
             } else {
-                throw new IllegalArgumentException("Invalid FQDN: " + quote(fqdn) + " can't split");
+                throw new IllegalArgumentException("Invalid FQDN: " + Stringify.toString(fqdn) + " can't split");
             }
             return this;
         }
@@ -493,6 +486,82 @@ public class Service {
                 throw new IllegalArgumentException("Invalid port");
             }
             this.port = port;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "ptr" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_PTR() {
+            return ttl_ptr;
+        }
+        /**
+         * Set the time-to-live in seconds for any "ptr" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_PTR(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_ptr = ttl;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "srv" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_SRV() {
+            return ttl_srv;
+        }
+        /**
+         * Set the time-to-live in seconds for any "srv" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_SRV(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_srv = ttl;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "txt" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_TXT() {
+            return ttl_txt;
+        }
+        /**
+         * Set the time-to-live in seconds for any "txt" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_TXT(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_txt = ttl;
+            return this;
+        }
+        /**
+         * Get the time-to-live in seconds for any "a" records announced for this service.
+         * @return the time-to-live
+         */
+        public int getTTL_A() {
+            return ttl_a;
+        }
+        /**
+         * Set the time-to-live in seconds for any "a" or "aaaa" records announced for this service.
+         * @param ttl the time-to-live in seconds
+         * @return this
+         */
+        public Builder setTTL_A(int ttl) {
+            if (ttl < MINTTL || ttl > MAXTTL) {
+                throw new IllegalArgumentException("TTL outside range " + MINTTL + ".." + MAXTTL);
+            }
+            ttl_a = ttl;
             return this;
         }
         /**
@@ -553,7 +622,7 @@ public class Service {
             }
             if (!props.isEmpty()) {
                 try {
-                    Record r = Record.newTxt("text", props);
+                    Record r = Record.newTxt(Record.TTL_TXT, "text", props);
                     r.write(java.nio.ByteBuffer.allocate(8192));
                 } catch (Exception e) {
                     throw (RuntimeException)new IllegalStateException("TXT record is too large").initCause(e);
@@ -583,8 +652,11 @@ public class Service {
             if (!props.isEmpty()) {
                 service.setText(Collections.<String,String>unmodifiableMap(props));
             }
+            service.ttl_a = ttl_a;
+            service.ttl_srv = ttl_srv;
+            service.ttl_ptr = ttl_ptr;
+            service.ttl_txt = ttl_txt;
             return service;
         }
     }
-
 }
