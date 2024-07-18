@@ -30,6 +30,30 @@ service.cancel();
 zc.close();
 ```
 
+To set custom TTLs for each mDNS record type:
+
+```java
+import com.bfo.zeroconf.*;
+
+Zeroconf zc = new Zeroconf();
+Service.Builder builder = new Service.Builder()
+                    .setName("MyWeb")
+                    .setType("_http._tcp")
+                    .setPort(8080)
+                    .put("path", "/path/to/service");
+
+// Custom TTLs for each mDNS record type.
+int ttl = 120;
+builder.setTTL_PTR(ttl);
+builder.setTTL_SRV(ttl);
+builder.setTTL_TXT(ttl);
+builder.setTTL_A(ttl);
+builder.build(zc);
+
+// Announce the service.
+service.announce();
+```
+
 And to listen, either add a Listener for events or use the live, thread-safe Collection of Services.
 
 ```java
