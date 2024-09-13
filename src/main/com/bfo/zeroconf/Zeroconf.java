@@ -542,7 +542,13 @@ public class Zeroconf {
             List<InetAddress> oldlist = localAddresses.get(nic);
             List<InetAddress> newlist = new ArrayList<InetAddress>();
             boolean ipv4 = false, ipv6 = false;
-            if (nic.isUp() && !remove) {
+            boolean up;
+            try {
+                up = nic.isUp();
+            } catch (Exception e) {     // Seen this: "Device not configured (getFlags() failed).
+                up = false;
+            }
+            if (up && !remove) {
                 for (Enumeration<InetAddress> e = nic.getInetAddresses();e.hasMoreElements();) {
                     InetAddress a = e.nextElement();
                     if (!a.isLoopbackAddress() && !a.isMulticastAddress()) {

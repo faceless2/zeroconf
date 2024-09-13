@@ -266,6 +266,7 @@ public class Service {
      * If the service is one being announced locally, the collection has the same values as
      * {@link Zeroconf#getNetworkInterfaces}
      * @since 1.0.1
+     * @return the read-only collection of NetworkInterface objects
      */
     public Collection<NetworkInterface> getNetworkInterfaces() {
         List<NetworkInterface> nics = new ArrayList<NetworkInterface>();

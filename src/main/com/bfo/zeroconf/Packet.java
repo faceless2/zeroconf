@@ -326,6 +326,7 @@ public class Packet {
 
     /**
      * Return the packet timestamp
+     * @return the timestamp
      */
     public long timestamp() {
         return timestamp;
