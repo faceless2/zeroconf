@@ -907,6 +907,7 @@ public class Zeroconf {
     }
 
     private List<Service> processAnswer(final Record r, final Packet packet, Service service) {
+        if (isDebug()) debug("# processAnswer(record=" + r + " s=" + service + ")");
         List<Service> out = null;
         if (r.getType() == Record.TYPE_PTR && r.getName().equals(DISCOVERY)) {
             String type = r.getPtrValue();
@@ -928,6 +929,9 @@ public class Zeroconf {
                                 log("Listener exception", e);
                             }
                         }
+                    }
+                    public String toString() {
+                        return "[expiring type-name \"" + type + "\"]";
                     }
                 });
             }
@@ -953,6 +957,9 @@ public class Zeroconf {
                             }
                         }
                     }
+                    public String toString() {
+                        return "[expiring type-name \"" + type + "\"]";
+                    }
                 });
             }
             if (heardServiceNames.add(fqdn)) {
@@ -975,6 +982,9 @@ public class Zeroconf {
                                     log("Listener exception", e);
                                 }
                             }
+                        }
+                        public String toString() {
+                            return "[expiring service-name \"" + name + "\"]";
                         }
                     });
                 } else {
@@ -1027,6 +1037,9 @@ public class Zeroconf {
                                 reannounce(fservice);
                             }
                         }
+                        public String toString() {
+                            return "[reannouncing service " + fservice + "]";
+                        }
                     });
                 } else {
                     if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
@@ -1042,6 +1055,9 @@ public class Zeroconf {
                                     log("Listener exception", e);
                                 }
                             }
+                        }
+                        public String toString() {
+                            return "[expiring service " + fservice + "]";
                         }
                     });
                     if (!modified) {
@@ -1075,6 +1091,9 @@ public class Zeroconf {
                             }
                         }
                     }
+                    public String toString() {
+                        return "[expiring TXT for service " + fservice + "]";
+                    }
                 });
             }
         } else if (r.getType() == Record.TYPE_A || r.getType() == Record.TYPE_AAAA) {
@@ -1106,6 +1125,9 @@ public class Zeroconf {
                             }
                         }
                     }
+                    public String toString() {
+                        return "[expiring A " + address + " for service " + fservice + "]";
+                    }
                 });
             }
         }
@@ -1123,13 +1145,22 @@ public class Zeroconf {
             ExpiryTask e = i.next();
             if (now > e.expiry) {
                 i.remove();
+                if (isDebug()) System.out.println("# expiry: processing " + e.task);
                 e.task.run();
             }
         }
     }
 
     private void expire(Object key, int ttl, Runnable task) {
-        expiry.put(key, new ExpiryTask(System.currentTimeMillis() + ttl * 1000, task));
+        ExpiryTask newtask = new ExpiryTask(System.currentTimeMillis() + ttl * 1000, task);
+        ExpiryTask oldtask = expiry.put(key, newtask);
+        if (isDebug()) {
+            if (oldtask != null) {
+                System.out.println("# expire(\"" + key + "\"): queueing " + newtask + ", replacing " + oldtask);
+            } else {
+                System.out.println("# expire(\"" + key + "\"): queueing " + newtask);
+            }
+        }
     }
 
     private static class ExpiryTask {
@@ -1138,6 +1169,31 @@ public class Zeroconf {
         ExpiryTask(long expiry, Runnable task) {
             this.expiry = expiry;
             this.task = task;
+        }
+        public String toString() {
+            return (expiry - System.currentTimeMillis()) + "ms " + task;
+        }
+    }
+
+    //-------------- Logging below here --------
+
+    private static Boolean DEBUG;
+    private synchronized static boolean isDebug() {
+        if (DEBUG == null) {
+            try {
+                DEBUG = System.getLogger(Zeroconf.class.getName()).isLoggable(System.Logger.Level.TRACE);
+            } catch (Throwable ex) {
+                DEBUG = java.util.logging.Logger.getLogger(Zeroconf.class.getName()).isLoggable(java.util.logging.Level.FINER);
+            }
+        }
+        return DEBUG.booleanValue();
+    }
+
+    private static void debug(String message) {
+        try {
+            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.TRACE, message);
+        } catch (Throwable ex) {
+            java.util.logging.Logger.getLogger(Zeroconf.class.getName()).log(java.util.logging.Level.FINER, message);
         }
     }
 
