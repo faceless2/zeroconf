@@ -1076,7 +1076,8 @@ public class Zeroconf {
                 }
             } else if (fqdn.equals(service.getFQDN()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
-                if (!service.setText(r.getText())) {
+                Map<String, String> text = (r.getTTL() == 0) ? null : r.getText();
+                if (!service.setText(text)) {
                     service = null;
                 }
                 expire("txt " + fqdn, r.getTTL(), new Runnable() {
