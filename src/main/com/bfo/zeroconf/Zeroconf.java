@@ -950,14 +950,17 @@ public class Zeroconf {
     private List<Service> processAnswer(final Record r, final Packet packet, Service service) {
         if (isDebug()) debug("# processAnswer(record=" + r + " s=" + service + ")");
         List<Service> out = null;
+        final boolean expiring = r.getTTL() == 0; // If this record is expiring, don't change or announce stuff. https://github.com/faceless2/zeroconf/issues/13
         if (r.getType() == Record.TYPE_PTR && r.getName().equals(DISCOVERY)) {
             String type = r.getPtrValue();
-            if (heardServiceTypes.add(type)) {
-                for (ZeroconfListener listener : listeners) {
-                    try {
-                        listener.typeNamed(type);
-                    } catch (Exception e) {
-                        log("Listener exception", e);
+            if (expiring || heardServiceTypes.add(type)) {
+                if (!expiring) {
+                    for (ZeroconfListener listener : listeners) {
+                        try {
+                            listener.typeNamed(type);
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                 }
                 expire(type, r.getTTL(), new Runnable() {
@@ -979,12 +982,14 @@ public class Zeroconf {
         } else if (r.getType() == Record.TYPE_PTR) {
             final String type = r.getName();
             final String fqdn = r.getPtrValue();        // Will be a service FQDN
-            if (heardServiceTypes.add(type)) {
-                for (ZeroconfListener listener : listeners) {
-                    try {
-                        listener.typeNamed(type);
-                    } catch (Exception e) {
-                        log("Listener exception", e);
+            if (expiring || heardServiceTypes.add(type)) {
+                if (!expiring) {
+                    for (ZeroconfListener listener : listeners) {
+                        try {
+                            listener.typeNamed(type);
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                 }
                 expire(type, r.getTTL(), new Runnable() {
@@ -1003,14 +1008,16 @@ public class Zeroconf {
                     }
                 });
             }
-            if (heardServiceNames.add(fqdn)) {
+            if (expiring || heardServiceNames.add(fqdn)) {
                 if (fqdn.endsWith(type)) {
                     final String name = fqdn.substring(0, fqdn.length() - type.length() - 1);
-                    for (ZeroconfListener listener : listeners) {
-                        try {
-                            listener.serviceNamed(type, name);
-                        } catch (Exception e) {
-                            log("Listener exception", e);
+                    if (!expiring) {
+                        for (ZeroconfListener listener : listeners) {
+                            try {
+                                listener.serviceNamed(type, name);
+                            } catch (Exception e) {
+                                log("Listener exception", e);
+                            }
                         }
                     }
                     expire(fqdn, r.getTTL(), new Runnable() {
@@ -1053,7 +1060,7 @@ public class Zeroconf {
                             break;
                         }
                     }
-                    if (service == null && r.getTTL() != 0) {
+                    if (service == null && !expiring) {
                         service = new Service(Zeroconf.this, fqdn, l.get(0), l.get(1), l.get(2));
                         modified = true;
                     }
@@ -1083,7 +1090,7 @@ public class Zeroconf {
                         }
                     });
                 } else {
-                    if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
+                    if (!expiring && service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
                         modified = true;
                     }
                     expire(service, r.getTTL(), new Runnable() {
@@ -1117,7 +1124,7 @@ public class Zeroconf {
                 }
             } else if (fqdn.equals(service.getFQDN()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
-                if (!service.setText(r.getText())) {
+                if (expiring || !service.setText(r.getText())) {
                     service = null;
                 }
                 expire("txt " + fqdn, r.getTTL(), new Runnable() {
@@ -1151,7 +1158,7 @@ public class Zeroconf {
             } else if (host.equals(service.getHost()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
                 InetAddress address = r.getAddress();
-                if (!service.addAddress(address, packet.getNetworkInterface())) {
+                if (expiring || !service.addAddress(address, packet.getNetworkInterface())) {
                     service = null;
                 }
                 expire(host + " " + address, r.getTTL(), new Runnable() {
