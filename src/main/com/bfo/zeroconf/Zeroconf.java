@@ -794,8 +794,8 @@ public class Zeroconf {
                 log("Send to \"" + nic.getName() + "\" failed with \"" + e.getMessage() + "\", disabling interface for " + (RECOVERYTIME/1000) + "s ", null);
                 disabledUntil = System.currentTimeMillis() + RECOVERYTIME;
             } else {
-                // Failed first time. Probably faulty. Disable permanently, don't log
-                disabledUntil = Long.MAX_VALUE;
+                // Failed first time. Probably faulty. Disable but don't log
+                disabledUntil = System.currentTimeMillis() + RECOVERYTIME;
             }
         }
         public String toString() {
