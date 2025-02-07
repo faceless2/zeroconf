@@ -58,6 +58,7 @@ public class Zeroconf {
     private static final int PORT = 5353;
     private static final String DISCOVERY = "_services._dns-sd._udp.local";
     private static final InetSocketAddress BROADCAST4, BROADCAST6;
+    private static final int RECOVERYTIME = 10000;     // If a packet send fails in a particular NIC, how long before we retry that NIC
     static {
         try {
             BROADCAST4 = new InetSocketAddress(InetAddress.getByName("224.0.0.251"), PORT);
@@ -678,7 +679,7 @@ public class Zeroconf {
                             nics = new HashSet<NetworkInterface>(localAddresses.keySet());
                         }
                         for (NicSelectionKey nsk : channels) {
-                            if (nsk.nic.isUp()) {
+                            if (nsk.nic.isUp() && !nsk.isDisabled()) {
                                 DatagramChannel channel = (DatagramChannel)nsk.key.channel();
                                 if (nic == null || nic.equals(nsk.nic)) {
                                     Packet dup = packet.appliedTo(nsk.nic, nics);
@@ -686,14 +687,19 @@ public class Zeroconf {
                                         ((Buffer)buf).clear();
                                         dup.write(buf);
                                         ((Buffer)buf).flip();
-                                        channel.send(buf, nsk.broadcast);
-                                        // System.out.println("# Sending " + dup + " to " + nsk.broadcast + " on " + nsk.nic.getName());
-                                        for (ZeroconfListener listener : listeners) {
-                                            try {
-                                                listener.packetSent(dup);
-                                            } catch (Exception e) {
-                                                log("Listener exception", e);
+                                        try {
+                                            channel.send(buf, nsk.broadcast);
+                                            // System.out.println("# Sending " + dup + " to " + nsk.broadcast + " on " + nsk.nic.getName());
+                                            nsk.packetSent();
+                                            for (ZeroconfListener listener : listeners) {
+                                                try {
+                                                    listener.packetSent(dup);
+                                                } catch (Exception e) {
+                                                    log("Listener exception", e);
+                                                }
                                             }
+                                        } catch (SocketException e) {
+                                            nsk.packetFailed(nic != null, e);
                                         }
                                     }
                                 }
@@ -755,10 +761,45 @@ public class Zeroconf {
         final NetworkInterface nic;
         final InetSocketAddress broadcast;
         final SelectionKey key;
+        private long disabledUntil;
+        private int packetSent;
         NicSelectionKey(NetworkInterface nic, InetSocketAddress broadcast, SelectionKey key) {
             this.nic = nic;
             this.broadcast = broadcast;
             this.key = key;
+        }
+        // On macOS at least (as of 202502) there seems to be issues with 
+        // bad NICs - they claim to be up, but trying to call sendmsg(1)
+        // returns ENOBUFS. We want to silently disable these, but this is
+        // also an error that can occur under heavy load in which case we
+        // do want to report them (not that our load should be that heavy).
+        // Solution for now: if the first send to it fails, disable permanently
+        // and silently if the NIC had been added automatically, otherwise
+        // disable for RECOVERYTIME and log.
+        // 
+        boolean isDisabled() {
+            return System.currentTimeMillis() < disabledUntil;
+        }
+        void packetSent() {
+            packetSent = Math.max(1, packetSent + 1);   // Catch wraps
+        }
+        /**
+         * Note that a packet has failed to send to this NIC
+         * @param log true if we really want to log this
+         * @param e the exception
+         */
+        void packetFailed(boolean log, SocketException e) {
+            if (packetSent > 0 || log) {
+                // We have sent to it once before, or it was added manually. Log it
+                log("Send to \"" + nic.getName() + "\" failed with \"" + e.getMessage() + "\", disabling interface for " + (RECOVERYTIME/1000) + "s ", null);
+                disabledUntil = System.currentTimeMillis() + RECOVERYTIME;
+            } else {
+                // Failed first time. Probably faulty. Disable permanently, don't log
+                disabledUntil = Long.MAX_VALUE;
+            }
+        }
+        public String toString() {
+            return "{nic:"+nic+",broadcast:"+broadcast+",key:"+key+"}";
         }
     }
 
