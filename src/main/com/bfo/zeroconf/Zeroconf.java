@@ -410,7 +410,7 @@ public class Zeroconf {
         return true;
     }
 
-    private void reannounce(Service service) {
+    void reannounce(Service service) {
         Packet packet = new Packet(service);
         announceServices.put(service, packet);
         send(packet);
@@ -1061,7 +1061,7 @@ public class Zeroconf {
                         }
                     }
                     if (service == null && !expiring) {
-                        service = new Service(Zeroconf.this, fqdn, l.get(0), l.get(1), l.get(2));
+                        service = new Service(Zeroconf.this, false, fqdn, l.get(0), l.get(1), l.get(2));
                         modified = true;
                     }
                 } else {

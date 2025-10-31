@@ -23,27 +23,16 @@ public class Service {
     private Map<InetAddress,Collection<NetworkInterface>> addresses;
     private Map<String,String> text;
     private long lastAddressRequest;
+    private final boolean built;        // true if we built it, false if we heard it
     boolean cancelled;  // This flag required becuase changes may happen after it is cancelled, which makes it look like a remote service.
 
-    Service(Zeroconf zeroconf, String fqdn, String name, String type, String domain) {
+    Service(Zeroconf zeroconf, boolean built, String fqdn, String name, String type, String domain) {
         this.zeroconf = zeroconf;
+        this.built = built;
         this.fqdn = fqdn;
         this.name = name;
         this.type = type;
         this.domain = domain;
-        this.addresses = new LinkedHashMap<InetAddress,Collection<NetworkInterface>>();
-    }
-
-    Service(Zeroconf zeroconf, String fqdn) {
-        List<String> l = splitFQDN(fqdn);
-        if (l == null) {
-            throw new IllegalArgumentException("Can't split " + Stringify.toString(fqdn));
-        }
-        this.zeroconf = zeroconf;
-        this.fqdn = fqdn;
-        this.name = l.get(0);
-        this.type = l.get(1);
-        this.domain = l.get(2);
         this.addresses = new LinkedHashMap<InetAddress,Collection<NetworkInterface>>();
     }
 
@@ -53,6 +42,15 @@ public class Service {
      */
     public Zeroconf getZeroconf() {
         return zeroconf;
+    }
+
+    /**
+     * Return true if the Service was first created from a {@link Builder} by this API,
+     * false if the Service was created as a result of an announcement by someone else.
+     * @since 1.0.3
+     */
+    public boolean isMine() {
+        return built;
     }
 
     /**
@@ -113,9 +111,29 @@ public class Service {
         return modified;
     }
 
-    boolean setText(Map<String,String> text) {
-        if (text == null ? this.text != null : !text.equals(this.text)) {
-            this.text = text;
+    /**
+     * Update the text for this service.
+     * If called on a Service created by a {@link Builder}, the record is updated.
+     * If the Service has been announced, it will be reannounced with the new record
+     * If called on a Service announced by someone else, will throw an {@link IllegalStatException}
+     * @param text the new text data
+     * @throws IllegalStateException if the Service was created by someone else
+     * @return true if the record was updated with new values, false if no change occurred
+     * @see #isMine
+     * @since 1.0.3
+     */
+    public boolean setText(Map<String,String> text) {
+        if (!built) {
+            throw new IllegalStateException("Can't replace text on a record you didn't create");
+        }
+        if (text == null) {
+            text = Collections.<String,String>emptyMap();
+        }
+        if (!text.equals(this.text)) {
+            this.text = text.isEmpty() ? Collections.<String,String>emptyMap() : Collections.<String,String>unmodifiableMap(new LinkedHashMap<String,String>(text));
+            if (zeroconf.getAnnouncedServices().contains(this)) {
+                zeroconf.reannounce(this);
+            }
             return true;
         }
         return false;
@@ -236,7 +254,7 @@ public class Service {
      * @return the text
      */
     public Map<String,String> getText() {
-        return text == null ? Collections.<String,String>emptyMap() : text;
+        return text;
     }
 
     /** 
@@ -640,7 +658,7 @@ public class Service {
             sb.append('.');
             sb.append(type);
             sb.append(domain);
-            Service service = new Service(zeroconf, sb.toString(), name, type, domain);
+            Service service = new Service(zeroconf, true, sb.toString(), name, type, domain);
             service.setHost(host, port);
             if (!addresses.isEmpty()) {
                 service.addresses = new LinkedHashMap<InetAddress,Collection<NetworkInterface>>();
@@ -650,9 +668,7 @@ public class Service {
             } else {
                 service.addresses = LOCAL;
             }
-            if (!props.isEmpty()) {
-                service.setText(Collections.<String,String>unmodifiableMap(props));
-            }
+            service.setText(props);
             service.ttl_a = ttl_a;
             service.ttl_srv = ttl_srv;
             service.ttl_ptr = ttl_ptr;
