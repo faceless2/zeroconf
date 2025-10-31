@@ -1,6 +1,6 @@
 # Zeroconf
 
-Zeroconf is a simple Java implementation of Multicast DNS Service Discovery, _aka_ the service discovery bit of Zeroconf.
+Zeroconf is a simple Java implementation of [Multicast DNS Service Discovery](https://datatracker.ietf.org/doc/html/rfc6763), _aka_ the service discovery bit of Zeroconf.
 Originally written as a quick hack to avoid having to use [https://github.com/jmdns/jmdns](https://github.com/jmdns/jmdns), it has evolved into something
 that can both announce and listen for Services:
 
