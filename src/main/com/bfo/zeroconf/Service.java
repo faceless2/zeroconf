@@ -111,6 +111,18 @@ public class Service {
         return modified;
     }
 
+    boolean _setText(Map<String,String> text) {
+        if (text == null) {
+            text = Collections.<String,String>emptyMap();
+        }
+        if (!text.equals(this.text)) {
+            this.text = text.isEmpty() ? Collections.<String,String>emptyMap() : Collections.<String,String>unmodifiableMap(new LinkedHashMap<String,
+String>(text));
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Update the text for this service.
      * If called on a Service created by a {@link Builder}, the record is updated.
@@ -126,11 +138,7 @@ public class Service {
         if (!built) {
             throw new IllegalStateException("Can't replace text on a record you didn't create");
         }
-        if (text == null) {
-            text = Collections.<String,String>emptyMap();
-        }
-        if (!text.equals(this.text)) {
-            this.text = text.isEmpty() ? Collections.<String,String>emptyMap() : Collections.<String,String>unmodifiableMap(new LinkedHashMap<String,String>(text));
+        if (_setText(text)) {
             if (zeroconf.getAnnouncedServices().contains(this)) {
                 zeroconf.reannounce(this);
             }

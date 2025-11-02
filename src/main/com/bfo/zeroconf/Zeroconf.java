@@ -1124,12 +1124,12 @@ public class Zeroconf {
                 }
             } else if (fqdn.equals(service.getFQDN()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
-                if (expiring || !service.setText(r.getText())) {
+                if (expiring || !service._setText(r.getText())) {
                     service = null;
                 }
                 expire("txt " + fqdn, r.getTTL(), new Runnable() {
                     public void run() {
-                        if (fservice.setText(null)) {
+                        if (fservice._setText(null)) {
                             for (ZeroconfListener listener : listeners) {
                                 try {
                                     listener.serviceModified(fservice);
