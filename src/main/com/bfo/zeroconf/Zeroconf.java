@@ -58,6 +58,7 @@ public class Zeroconf {
     private static final int PORT = 5353;
     private static final String DISCOVERY = "_services._dns-sd._udp.local";
     private static final InetSocketAddress BROADCAST4, BROADCAST6;
+    private static final int RECOVERYTIME = 10000;     // If a packet send fails in a particular NIC, how long before we retry that NIC
     static {
         try {
             BROADCAST4 = new InetSocketAddress(InetAddress.getByName("224.0.0.251"), PORT);
@@ -409,7 +410,7 @@ public class Zeroconf {
         return true;
     }
 
-    private void reannounce(Service service) {
+    void reannounce(Service service) {
         Packet packet = new Packet(service);
         announceServices.put(service, packet);
         send(packet);
@@ -542,7 +543,13 @@ public class Zeroconf {
             List<InetAddress> oldlist = localAddresses.get(nic);
             List<InetAddress> newlist = new ArrayList<InetAddress>();
             boolean ipv4 = false, ipv6 = false;
-            if (nic.isUp() && !remove) {
+            boolean up;
+            try {
+                up = nic.isUp();
+            } catch (Exception e) {     // Seen this: "Device not configured (getFlags() failed).
+                up = false;
+            }
+            if (up && !remove) {
                 for (Enumeration<InetAddress> e = nic.getInetAddresses();e.hasMoreElements();) {
                     InetAddress a = e.nextElement();
                     if (!a.isLoopbackAddress() && !a.isMulticastAddress()) {
@@ -672,7 +679,7 @@ public class Zeroconf {
                             nics = new HashSet<NetworkInterface>(localAddresses.keySet());
                         }
                         for (NicSelectionKey nsk : channels) {
-                            if (nsk.nic.isUp()) {
+                            if (nsk.nic.isUp() && !nsk.isDisabled()) {
                                 DatagramChannel channel = (DatagramChannel)nsk.key.channel();
                                 if (nic == null || nic.equals(nsk.nic)) {
                                     Packet dup = packet.appliedTo(nsk.nic, nics);
@@ -680,14 +687,19 @@ public class Zeroconf {
                                         ((Buffer)buf).clear();
                                         dup.write(buf);
                                         ((Buffer)buf).flip();
-                                        channel.send(buf, nsk.broadcast);
-                                        // System.out.println("# Sending " + dup + " to " + nsk.broadcast + " on " + nsk.nic.getName());
-                                        for (ZeroconfListener listener : listeners) {
-                                            try {
-                                                listener.packetSent(dup);
-                                            } catch (Exception e) {
-                                                log("Listener exception", e);
+                                        try {
+                                            channel.send(buf, nsk.broadcast);
+                                            // System.out.println("# Sending " + dup + " to " + nsk.broadcast + " on " + nsk.nic.getName());
+                                            nsk.packetSent();
+                                            for (ZeroconfListener listener : listeners) {
+                                                try {
+                                                    listener.packetSent(dup);
+                                                } catch (Exception e) {
+                                                    log("Listener exception", e);
+                                                }
                                             }
+                                        } catch (SocketException e) {
+                                            nsk.packetFailed(nic != null, e);
                                         }
                                     }
                                 }
@@ -749,10 +761,45 @@ public class Zeroconf {
         final NetworkInterface nic;
         final InetSocketAddress broadcast;
         final SelectionKey key;
+        private long disabledUntil;
+        private int packetSent;
         NicSelectionKey(NetworkInterface nic, InetSocketAddress broadcast, SelectionKey key) {
             this.nic = nic;
             this.broadcast = broadcast;
             this.key = key;
+        }
+        // On macOS at least (as of 202502) there seems to be issues with 
+        // bad NICs - they claim to be up, but trying to call sendmsg(1)
+        // returns ENOBUFS. We want to silently disable these, but this is
+        // also an error that can occur under heavy load in which case we
+        // do want to report them (not that our load should be that heavy).
+        // Solution for now: if the first send to it fails, disable permanently
+        // and silently if the NIC had been added automatically, otherwise
+        // disable for RECOVERYTIME and log.
+        // 
+        boolean isDisabled() {
+            return System.currentTimeMillis() < disabledUntil;
+        }
+        void packetSent() {
+            packetSent = Math.max(1, packetSent + 1);   // Catch wraps
+        }
+        /**
+         * Note that a packet has failed to send to this NIC
+         * @param log true if we really want to log this
+         * @param e the exception
+         */
+        void packetFailed(boolean log, SocketException e) {
+            if (packetSent > 0 || log) {
+                // We have sent to it once before, or it was added manually. Log it
+                log("Send to \"" + nic.getName() + "\" failed with \"" + e.getMessage() + "\", disabling interface for " + (RECOVERYTIME/1000) + "s ", null);
+                disabledUntil = System.currentTimeMillis() + RECOVERYTIME;
+            } else {
+                // Failed first time. Probably faulty. Disable but don't log
+                disabledUntil = System.currentTimeMillis() + RECOVERYTIME;
+            }
+        }
+        public String toString() {
+            return "{nic:"+nic+",broadcast:"+broadcast+",key:"+key+"}";
         }
     }
 
@@ -901,15 +948,19 @@ public class Zeroconf {
     }
 
     private List<Service> processAnswer(final Record r, final Packet packet, Service service) {
+        if (isDebug()) debug("# processAnswer(record=" + r + " s=" + service + ")");
         List<Service> out = null;
+        final boolean expiring = r.getTTL() == 0; // If this record is expiring, don't change or announce stuff. https://github.com/faceless2/zeroconf/issues/13
         if (r.getType() == Record.TYPE_PTR && r.getName().equals(DISCOVERY)) {
             String type = r.getPtrValue();
-            if (heardServiceTypes.add(type)) {
-                for (ZeroconfListener listener : listeners) {
-                    try {
-                        listener.typeNamed(type);
-                    } catch (Exception e) {
-                        log("Listener exception", e);
+            if (expiring || heardServiceTypes.add(type)) {
+                if (!expiring) {
+                    for (ZeroconfListener listener : listeners) {
+                        try {
+                            listener.typeNamed(type);
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                 }
                 expire(type, r.getTTL(), new Runnable() {
@@ -922,18 +973,23 @@ public class Zeroconf {
                                 log("Listener exception", e);
                             }
                         }
+                    }
+                    public String toString() {
+                        return "[expiring type-name \"" + type + "\"]";
                     }
                 });
             }
         } else if (r.getType() == Record.TYPE_PTR) {
             final String type = r.getName();
             final String fqdn = r.getPtrValue();        // Will be a service FQDN
-            if (heardServiceTypes.add(type)) {
-                for (ZeroconfListener listener : listeners) {
-                    try {
-                        listener.typeNamed(type);
-                    } catch (Exception e) {
-                        log("Listener exception", e);
+            if (expiring || heardServiceTypes.add(type)) {
+                if (!expiring) {
+                    for (ZeroconfListener listener : listeners) {
+                        try {
+                            listener.typeNamed(type);
+                        } catch (Exception e) {
+                            log("Listener exception", e);
+                        }
                     }
                 }
                 expire(type, r.getTTL(), new Runnable() {
@@ -947,16 +1003,21 @@ public class Zeroconf {
                             }
                         }
                     }
+                    public String toString() {
+                        return "[expiring type-name \"" + type + "\"]";
+                    }
                 });
             }
-            if (heardServiceNames.add(fqdn)) {
+            if (expiring || heardServiceNames.add(fqdn)) {
                 if (fqdn.endsWith(type)) {
                     final String name = fqdn.substring(0, fqdn.length() - type.length() - 1);
-                    for (ZeroconfListener listener : listeners) {
-                        try {
-                            listener.serviceNamed(type, name);
-                        } catch (Exception e) {
-                            log("Listener exception", e);
+                    if (!expiring) {
+                        for (ZeroconfListener listener : listeners) {
+                            try {
+                                listener.serviceNamed(type, name);
+                            } catch (Exception e) {
+                                log("Listener exception", e);
+                            }
                         }
                     }
                     expire(fqdn, r.getTTL(), new Runnable() {
@@ -969,6 +1030,9 @@ public class Zeroconf {
                                     log("Listener exception", e);
                                 }
                             }
+                        }
+                        public String toString() {
+                            return "[expiring service-name \"" + name + "\"]";
                         }
                     });
                 } else {
@@ -996,8 +1060,8 @@ public class Zeroconf {
                             break;
                         }
                     }
-                    if (service == null && r.getTTL() != 0) {
-                        service = new Service(Zeroconf.this, fqdn, l.get(0), l.get(1), l.get(2));
+                    if (service == null && !expiring) {
+                        service = new Service(Zeroconf.this, false, fqdn, l.get(0), l.get(1), l.get(2));
                         modified = true;
                     }
                 } else {
@@ -1021,9 +1085,12 @@ public class Zeroconf {
                                 reannounce(fservice);
                             }
                         }
+                        public String toString() {
+                            return "[reannouncing service " + fservice + "]";
+                        }
                     });
                 } else {
-                    if (service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
+                    if (!expiring && service.setHost(r.getSrvHost(), r.getSrvPort()) && !modified) {
                         modified = true;
                     }
                     expire(service, r.getTTL(), new Runnable() {
@@ -1036,6 +1103,9 @@ public class Zeroconf {
                                     log("Listener exception", e);
                                 }
                             }
+                        }
+                        public String toString() {
+                            return "[expiring service " + fservice + "]";
                         }
                     });
                     if (!modified) {
@@ -1054,12 +1124,12 @@ public class Zeroconf {
                 }
             } else if (fqdn.equals(service.getFQDN()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
-                if (!service.setText(r.getText())) {
+                if (expiring || !service._setText(r.getText())) {
                     service = null;
                 }
                 expire("txt " + fqdn, r.getTTL(), new Runnable() {
                     public void run() {
-                        if (fservice.setText(null)) {
+                        if (fservice._setText(null)) {
                             for (ZeroconfListener listener : listeners) {
                                 try {
                                     listener.serviceModified(fservice);
@@ -1068,6 +1138,9 @@ public class Zeroconf {
                                 }
                             }
                         }
+                    }
+                    public String toString() {
+                        return "[expiring TXT for service " + fservice + "]";
                     }
                 });
             }
@@ -1085,7 +1158,7 @@ public class Zeroconf {
             } else if (host.equals(service.getHost()) && !getAnnouncedServices().contains(service)) {
                 final Service fservice = service;
                 InetAddress address = r.getAddress();
-                if (!service.addAddress(address, packet.getNetworkInterface())) {
+                if (expiring || !service.addAddress(address, packet.getNetworkInterface())) {
                     service = null;
                 }
                 expire(host + " " + address, r.getTTL(), new Runnable() {
@@ -1099,6 +1172,9 @@ public class Zeroconf {
                                 }
                             }
                         }
+                    }
+                    public String toString() {
+                        return "[expiring A " + address + " for service " + fservice + "]";
                     }
                 });
             }
@@ -1117,13 +1193,22 @@ public class Zeroconf {
             ExpiryTask e = i.next();
             if (now > e.expiry) {
                 i.remove();
+                if (isDebug()) System.out.println("# expiry: processing " + e.task);
                 e.task.run();
             }
         }
     }
 
     private void expire(Object key, int ttl, Runnable task) {
-        expiry.put(key, new ExpiryTask(System.currentTimeMillis() + ttl * 1000, task));
+        ExpiryTask newtask = new ExpiryTask(System.currentTimeMillis() + ttl * 1000, task);
+        ExpiryTask oldtask = expiry.put(key, newtask);
+        if (isDebug()) {
+            if (oldtask != null) {
+                System.out.println("# expire(\"" + key + "\"): queueing " + newtask + ", replacing " + oldtask);
+            } else {
+                System.out.println("# expire(\"" + key + "\"): queueing " + newtask);
+            }
+        }
     }
 
     private static class ExpiryTask {
@@ -1132,6 +1217,31 @@ public class Zeroconf {
         ExpiryTask(long expiry, Runnable task) {
             this.expiry = expiry;
             this.task = task;
+        }
+        public String toString() {
+            return (expiry - System.currentTimeMillis()) + "ms " + task;
+        }
+    }
+
+    //-------------- Logging below here --------
+
+    private static Boolean DEBUG;
+    private synchronized static boolean isDebug() {
+        if (DEBUG == null) {
+            try {
+                DEBUG = System.getLogger(Zeroconf.class.getName()).isLoggable(System.Logger.Level.TRACE);
+            } catch (Throwable ex) {
+                DEBUG = java.util.logging.Logger.getLogger(Zeroconf.class.getName()).isLoggable(java.util.logging.Level.FINER);
+            }
+        }
+        return DEBUG.booleanValue();
+    }
+
+    private static void debug(String message) {
+        try {
+            System.getLogger(Zeroconf.class.getName()).log(System.Logger.Level.TRACE, message);
+        } catch (Throwable ex) {
+            java.util.logging.Logger.getLogger(Zeroconf.class.getName()).log(java.util.logging.Level.FINER, message);
         }
     }
 

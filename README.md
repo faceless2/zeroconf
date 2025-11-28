@@ -1,6 +1,6 @@
 # Zeroconf
 
-Zeroconf is a simple Java implementation of Multicast DNS Service Discovery, _aka_ the service discovery bit of Zeroconf.
+Zeroconf is a simple Java implementation of [Multicast DNS Service Discovery](https://datatracker.ietf.org/doc/html/rfc6763), _aka_ the service discovery bit of Zeroconf.
 Originally written as a quick hack to avoid having to use [https://github.com/jmdns/jmdns](https://github.com/jmdns/jmdns), it has evolved into something
 that can both announce and listen for Services:
 
@@ -9,7 +9,7 @@ that can both announce and listen for Services:
 * Sent packets include only the A and AAAA records that apply to the interface they're sent on
 * Requires Java 8+ and no other dependencies.
 * Javadocs at [https://faceless2.github.io/zeroconf/docs](https://faceless2.github.io/zeroconf/docs/)
-* Prebuilt binary at [https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.2.jar](https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.2.jar)
+* Prebuilt binary at [https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.3.jar](https://faceless2.github.io/zeroconf/dist/zeroconf-1.0.3.jar)
 
 Here's a simple example which announces a service on all interfaces on the local machine:
 

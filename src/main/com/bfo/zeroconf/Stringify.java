@@ -149,6 +149,8 @@ class Stringify {
                     sb.append("\\t");
                 } else if (c == '"') {
                     sb.append("\\\"");
+                } else if (c == '\\') {
+                    sb.append("\\\\");
                 } else if (Character.isISOControl(c)) {     // 0x00-0x1F, 0x80-0x9F
                     String t = Integer.toHexString(c);
                     sb.append("\\u");
